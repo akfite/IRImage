@@ -138,6 +138,47 @@ classdef IRImage < hgsetget
         end
         
         % ---------------------------------------------------------------------------------------- %
+        % GAUSSIAN BOX FILTER (2D FILTER)
+        % ---------------------------------------------------------------------------------------- %
+        function [obj, kernel] = gauss2d(obj, kernelSize)
+            % check inputs
+            if nargin < 2
+                error('Specify the size of the kernel as an odd integer greater than 1.');
+            elseif isempty(kernelSize) || ~isscalar(kernelSize) || isnan(kernelSize) || kernelSize <= 1 || mod(kernelSize,2) ~= 1
+                error('Invalid kernel size.  The kernel must be an odd integer greater than 1.');
+            end
+            
+            % initialize the kernel in pixel space
+            kernel = nan(kernelSize);
+            
+            % create a 2D gaussian with mean of zero and standard deviation of 1
+            % important to note is that the resolution of the gaussian scales with kernel size
+            scalefactor = 200;
+            dim = linspace(-3,3,kernelSize*scalefactor);
+            [x,y] = meshgrid(dim, dim);
+            P = 1/(2 * sqrt(2*pi)) * exp(-(x.^2 + y.^2)./(2));
+            
+            % now divide the gaussian into a grid the size of the output kernel, in pixels
+            gridStart = 1:scalefactor:(kernelSize*scalefactor);
+            gridEnd   = scalefactor:scalefactor:(kernelSize*scalefactor);
+            
+            % now integrate by summing over each tile in the grid
+            for iRow = 1:kernelSize
+                for iCol = 1:kernelSize
+                    activeTile = P(gridStart(iRow):gridEnd(iRow), gridStart(iCol):gridEnd(iCol));
+                    kernel(iRow,iCol) = sum(activeTile(:));
+                end
+            end
+            
+            % force the kernel to have a unit volume of 1
+            kernel = kernel/sum(kernel(:));
+             
+            % now apply the kernel to the values in the object
+            obj.values = filter2(kernel, double(obj.values), 'same');
+        end
+        
+        
+        % ---------------------------------------------------------------------------------------- %
         % PIXEL-TO-LOS ANGLE CONVERSION
         % ---------------------------------------------------------------------------------------- %
         
@@ -363,6 +404,8 @@ classdef IRImage < hgsetget
         % ---------------------------------------------------------------------------------------- %
         
         function autoUpdateAxes(obj, hImage, prop)
+            % done as 3 separate listeners to preserve backwards compatibility with older MATLAB
+            % versions.  maybe there's a better way to do this.
             hl_1 = addlistener(obj, 'values', 'PostSet', @(o,e) set(hImage, prop, e.AffectedObject.values));
             hl_2 = addlistener(obj, 'values', 'PostSet', @(o,e) axis(get(hImage,'parent'),'tight'));
             hl_3 = addlistener(obj, 'values', 'PostSet', @(o,e) drawnow);
