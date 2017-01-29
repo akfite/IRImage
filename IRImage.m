@@ -1,10 +1,11 @@
 classdef IRImage < hgsetget
-    %IRIMAGE IRST+FLIR image manipulation.
+    %IRIMAGE Class for grayscale image manipulation.
     %   IMG = IRImage(<MxN array>) creates a reference to an IRImage object
     %   with three public properties:
     %       1) values
     %       2) mirror   (TOP, BOT, LEFT, RIGHT)
     %       3) pads     (TOP, BOT, LEFT, RIGHT)
+    %
     %   While traditionally we would operate on the IMG.values prop, here you 
     %   can interact directly with the IMG object itself.  For example, any math
     %   operation and most plotting functions can be used as follows:
@@ -96,6 +97,18 @@ classdef IRImage < hgsetget
         end
         
         % ---------------------------------------------------------------------------------------- %
+        % RETURN A NEW OBJECT WITH "clone" OR "copy"
+        % ---------------------------------------------------------------------------------------- %
+        function newObj = clone(obj), newObj = copy(obj); end   % alternatively use "clone"
+        function newObj = copy(obj)
+            newObj = IRImage(obj.values);
+            newObj.lastpads = obj.pads;
+            newObj.lastmirror = obj.mirror;
+            newObj.pads = obj.pads;
+            newObj.mirror = obj.mirror;
+        end
+        
+        % ---------------------------------------------------------------------------------------- %
         % ROW MEAN REMOVAL
         % ---------------------------------------------------------------------------------------- %
         function obj = rmr(obj)
@@ -112,7 +125,7 @@ classdef IRImage < hgsetget
                     filter = ones(1,filter)/filter;
                 else
                     % no funny business
-                    error('1-D filters must have an odd number of elements!  %d is not a valid size.',filter)
+                    error('Filter dimensions must be odd!  %d is not a valid size.',filter)
                 end
             end
             
@@ -129,7 +142,7 @@ classdef IRImage < hgsetget
                 if mod(filter,2) ~= 0
                     filter = ones(1,filter)/filter;
                 else
-                    error('1-D filters must have an odd number of elements!  %d is not a valid size.',filter)
+                    error('Filter dimensions must be odd!  %d is not a valid size.',filter)
                 end
             end
             
@@ -138,45 +151,16 @@ classdef IRImage < hgsetget
         end
         
         % ---------------------------------------------------------------------------------------- %
-        % GAUSSIAN BOX FILTER (2D FILTER)
+        % 2-D FOURIER TRANSFORM
         % ---------------------------------------------------------------------------------------- %
-        function [obj, kernel] = gauss2d(obj, kernelSize)
-            % check inputs
-            if nargin < 2
-                error('Specify the size of the kernel as an odd integer greater than 1.');
-            elseif isempty(kernelSize) || ~isscalar(kernelSize) || isnan(kernelSize) || kernelSize <= 1 || mod(kernelSize,2) ~= 1
-                error('Invalid kernel size.  The kernel must be an odd integer greater than 1.');
-            end
-            
-            % initialize the kernel in pixel space
-            kernel = nan(kernelSize);
-            
-            % create a 2D gaussian with mean of zero and standard deviation of 1
-            % important to note is that the resolution of the gaussian scales with kernel size
-            scalefactor = 200;
-            dim = linspace(-3,3,kernelSize*scalefactor);
-            [x,y] = meshgrid(dim, dim);
-            P = 1/(2 * sqrt(2*pi)) * exp(-(x.^2 + y.^2)./(2));
-            
-            % now divide the gaussian into a grid the size of the output kernel, in pixels
-            gridStart = 1:scalefactor:(kernelSize*scalefactor);
-            gridEnd   = scalefactor:scalefactor:(kernelSize*scalefactor);
-            
-            % now integrate by summing over each tile in the grid
-            for iRow = 1:kernelSize
-                for iCol = 1:kernelSize
-                    activeTile = P(gridStart(iRow):gridEnd(iRow), gridStart(iCol):gridEnd(iCol));
-                    kernel(iRow,iCol) = sum(activeTile(:));
-                end
-            end
-            
-            % force the kernel to have a unit volume of 1
-            kernel = kernel/sum(kernel(:));
-             
-            % now apply the kernel to the values in the object
-            obj.values = filter2(kernel, double(obj.values), 'same');
+        function fft(obj)
+            F = fft2(obj.values);
+            F = fftshift(F);
+            F = sqrt(real(F).^2 + imag(F).^2);
+            F = log(F+1);
+            figure; imshow(F,[]);
+            colormap gray
         end
-        
         
         % ---------------------------------------------------------------------------------------- %
         % PIXEL-TO-LOS ANGLE CONVERSION
@@ -193,7 +177,7 @@ classdef IRImage < hgsetget
         end
     end
     
-    %% PUBLIC REQUIRING TOOLBOX
+    %% PUBLIC REQUIRING IMAGE TOOLBOX
     methods (Access = public)
         % ---------------------------------------------------------------------------------------- %
         % RESIZING
@@ -260,7 +244,16 @@ classdef IRImage < hgsetget
             
             switch ext
                 case {'.tif','.tiff','.png','.jpg','.bmp','.gif','.jpeg','.jp2','.jpx'}
-                    obj.values = imread(filepath);
+                    % load into a temporary var first
+                    img = imread(filepath);
+                    
+                    % make sure it's a grayscale image.  if not, flatten it
+                    if size(img,3) > 1
+                        img = rgb2gray(img);
+                    end
+                    
+                    % assign to the object
+                    obj.values = img;
                     obj.savedData = obj.values;
                 case '.mat'
                     % placeholder
@@ -418,6 +411,69 @@ classdef IRImage < hgsetget
         
     end
     
+    
+    %% KERNELS (STATIC METHODS)
+    methods (Static, Access = public)
+        % ---------------------------------------------------------------------------------------- %
+        % GAUSSIAN BOX FILTER KERNEL (2D FILTER)
+        % ---------------------------------------------------------------------------------------- %
+        function kernel = gauss2d(N,sigma)
+            % GAUSS2D Create a 2-D gaussian filter in pixel space.
+            %   K = GAUSS2D(N,SIGMA) creates an NxN kernel K which approximates
+            %   a multivariate Gaussian distribution with a mean of zero and 
+            %   a standard deviation of SIGMA.  The function is bounded on the
+            %   x/y range [-3,3] regardless of the value of SIGMA.
+            %   
+            %   When convolved with an image, a 2-D Gaussian filter applies 
+            %   a blurring effect similar to a mean filter.  However, in contrast
+            %   to a mean filter, the Gaussian is weighted towards the center and
+            %   thus is more effective at preserving high-frequency edge content.
+            %
+            %   To apply this kernel to an image inside an IRImage object, use the
+            %   primary filtering methods: filt and sfilt. 
+            %   e.g.
+            %       img = IRImage(...);
+            %       img.filt(img.gauss2d(13));
+            %
+            %   Or, as a static method:
+            %       kernel = IRImage.gauss2d(13);
+            %
+            %   A.Fite, 2017
+            
+            if isempty(N) || ~isscalar(N) || isnan(N) || N <= 1 || mod(N,2) ~= 1
+                error('The kernel width must be an odd integer greater than 1.');
+            end
+            
+            if nargin < 2, sigma = 1; end
+            
+            % initialize the output kernel 
+            kernel = nan(N);
+            
+            % create a 2D gaussian with mean of zero and standard deviation of 1
+            % important to note is that the resolution of the gaussian scales with kernel size
+            scalefactor = 25;
+            dim = linspace(-3,3,N*scalefactor);
+            [x,y] = meshgrid(dim, dim);
+            P = 1/(2 * sqrt(2*pi)*sigma) * exp(-(x.^2 + y.^2)./(2*sigma^2));
+            
+            % now divide the gaussian into a grid the size of the output kernel
+            gridStart = 1:scalefactor:(N*scalefactor);
+            gridEnd   = scalefactor:scalefactor:(N*scalefactor);
+            
+            % integrate by summing over each tile in the grid and write the integral to a pixel
+            % in the output kernel
+            for iRow = 1:N
+                for iCol = 1:N
+                    activeTile = P(gridStart(iRow):gridEnd(iRow), gridStart(iCol):gridEnd(iCol));
+                    kernel(iRow,iCol) = sum(activeTile(:));
+                end
+            end
+            
+            % force the kernel to have a unit volume of 1
+            kernel = kernel/sum(kernel(:));
+        end
+    end
+    
     %% ACCESSORS
     methods (Access = public)
         function v = rmin(obj)
@@ -442,6 +498,10 @@ classdef IRImage < hgsetget
     methods (Access = public)
         % PLOTTING ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ %
         function h = imagesc(obj, varargin) 
+            % By requesting the plot function on the object rather than the
+            % underlying values, we'll add some extra functionality by linking
+            % the object to the plot axis and auto-updating the axis as the
+            % object changes.
             himg = imagesc(obj.values, varargin{:});
             autoUpdateAxes(obj, himg, 'cdata');
             if nargout > 0, h = himg; end
@@ -477,14 +537,16 @@ classdef IRImage < hgsetget
         function obj = int64(obj),    obj.values = int64(obj.values);         end
         function obj = logical(obj),  obj.values = logical(obj.values);       end
         
-        % COMMON FUNCTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ %
+        % VALUE RETURN FUNCTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ %
         function v = max(obj),      v = max(obj.values(:));                   end
         function v = min(obj),      v = min(obj.values(:));                   end
         
+        % VALUE MODIFICATION FUNCTIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ %
+        
         % MATH ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ %
         % TWO INPUTS
-        function obj = plus(a, b),    [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1+arg2; end
-        function obj = minus(a, b),   [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1-arg2; end
+        function obj = plus(a, b),    [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1+arg2;    end
+        function obj = minus(a, b),   [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1-arg2;    end
         function obj = times(a, b),   [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1.*arg2;   end
         function obj = mtimes(a, b),  [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1*arg2;    end
         function obj = rdivide(a, b), [arg1, arg2, obj] = parseargs(a, b); obj.values = arg1./arg2;   end
