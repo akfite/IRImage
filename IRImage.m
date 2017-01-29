@@ -52,7 +52,36 @@ classdef IRImage < hgsetget
                     case {'char', 'string'}
                         % try to load from file and automatically determine settings based on 
                         % the file extension.  not the most reliable way to load, but convenient
-                        obj = loadFromFile(obj, inputImage);
+                        filepath = inputImage;
+                        if ~exist(filepath,'file')
+                            error('Unable to read file ''%s''.  No such file exists.', filepath);
+                        end
+
+                        % change behavior based on the filepath provided
+                        [~, filename, ext] = fileparts(filepath); %#ok<*ASGLU>
+
+                        switch lower(ext)
+                            case {'.tif','.tiff','.png','.jpg','.bmp','.gif','.jpeg','.jp2','.jpx'}
+                                % load into a temporary var first
+                                img = imread(filepath);
+
+                                % make sure it's a grayscale image.  if not, flatten it
+                                if size(img,3) == 3
+                                    img = rgb2gray(img);
+                                elseif ~ismatrix(img)
+                                    error('Multidimensional data types are not supported.  (NDIMS > 2)')
+                                end
+
+                                % assign to the object
+                                obj.values = img;
+                                obj.savedData = obj.values;
+                            case '.mat'
+                                % placeholder
+                                error('.mat decoding is not supported at this time.');
+                            case '.raw'
+                                % might add raw decoding later
+                                error('.raw decoding is not supported at this time.');
+                        end
                         
                     case 'cell'
                         % when given a cellstr of filepaths, recursively load them into an array of
@@ -109,6 +138,65 @@ classdef IRImage < hgsetget
         end
         
         % ---------------------------------------------------------------------------------------- %
+        % CUT IMAGE SNIP
+        % ---------------------------------------------------------------------------------------- %
+        function tile = snip(obj, x, y, snipsize)
+            % SNIP Cut out a section of an image.
+            %   SNIP = SNIP(OBJ, X, Y, SIZE) cuts out a region of values centered
+            %   at coordinate [X,Y] with dimensions defined by SIZE.  Out-of-bounds
+            %   values are returned as NaNs.
+            %
+            %   SIZE can be a 2-element array or a scalar. Scalar input returns a square
+            %   box cutout with dimensions of width equal to the scalar.  Inputs are 
+            %   required to be odd integer values.
+            %
+            %   A.Fite, 2017
+            
+            if nargin < 4 || isempty(snipsize)
+                % snip to 10% of the image size
+                snipsize = [ceil(size(obj.values,2)*0.1), ceil(size(obj.values,2)*0.1)];
+                snipsize = snipsize + (~mod(snipsize,2));
+            elseif isscalar(snipsize)
+                % make single input a square box of the same width
+                snipsize = repmat(snipsize, [1 2]);
+            end
+            
+            % check for valid input for the size window (odd integers)
+            if length(snipsize) ~= 2 || ~all(mod(snipsize,2) == 1) || any(isnan(snipsize))
+                error('Invalid size window input.  All values must be odd integers.');
+            end
+            
+            x = floor(x);
+            y = floor(y);
+            
+            % initialize the output tile
+            tile = nan(snipsize);
+            
+            % find output tile extents without considering the valid area of the image
+            hx = floor(snipsize(1)/2);  
+            hy = floor(snipsize(2)/2);
+            xi = x-hx; 
+            xf = x+hx; 
+            yi = y-hy; 
+            yf = y+hy;
+            
+            % now bound the output tile extents to the image boundaries
+            Xi = max(xi, 1);
+            Xf = min(xf, size(obj.values, 2));
+            Yi = max(yi, 1);
+            Yf = min(yf, size(obj.values,1));
+            
+            % place the valid snip area inside the tile, making sure to keep the invalid
+            % area consistent with the original image.  i.e. snipping a 3x3 at coordinate (1,1) 
+            % should create an invalid region at the top & left sides of the snipped image
+            cutout = obj.values(Yi:Yf, Xi:Xf);
+            rowrange = 1+(Yi-yi):snipsize(1)-(yf-Yf);
+            colrange = 1+(Xi-xi):snipsize(2)-(xf-Xf);
+            
+            tile(rowrange, colrange) = cutout;
+        end
+        
+        % ---------------------------------------------------------------------------------------- %
         % ROW MEAN REMOVAL
         % ---------------------------------------------------------------------------------------- %
         function obj = rmr(obj)
@@ -153,12 +241,13 @@ classdef IRImage < hgsetget
         % ---------------------------------------------------------------------------------------- %
         % 2-D FOURIER TRANSFORM
         % ---------------------------------------------------------------------------------------- %
-        function fft(obj)
+        function out = fft(obj)
             F = fft2(obj.values);
-            F = fftshift(F);
-            F = sqrt(real(F).^2 + imag(F).^2);
-            F = log(F+1);
+            F = fftshift(F); % center the transform at 0,0
+            F = sqrt(real(F).^2 + imag(F).^2); % take the magnitude
+            F = log(F+1); % need to reduce the dynamic range and log() is undefined at 0
             figure; imshow(F,[]);
+            if nargout > 1, out = F; end
             colormap gray
         end
         
@@ -234,33 +323,6 @@ classdef IRImage < hgsetget
         end
         
         function obj = loadFromFile(obj, filepath)
-            % if the image doesn't exist, return an error
-            if ~exist(filepath,'file')
-                error('Unable to read file ''%s''.  No such file exists.', filepath);
-            end
-            
-            % change behavior based on the filepath provided
-            [~, filename, ext] = fileparts(filepath); %#ok<*ASGLU>
-            
-            switch ext
-                case {'.tif','.tiff','.png','.jpg','.bmp','.gif','.jpeg','.jp2','.jpx'}
-                    % load into a temporary var first
-                    img = imread(filepath);
-                    
-                    % make sure it's a grayscale image.  if not, flatten it
-                    if size(img,3) > 1
-                        img = rgb2gray(img);
-                    end
-                    
-                    % assign to the object
-                    obj.values = img;
-                    obj.savedData = obj.values;
-                case '.mat'
-                    % placeholder
-                case '.raw'
-                    % might add raw decoding later
-                    error('Raw decoding is not supported at this time.');
-            end
         end
         
         function obj = padsChanged(~, event)
