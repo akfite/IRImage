@@ -154,7 +154,7 @@ classdef IRImage < hgsetget
             
             if nargin < 4 || isempty(snipsize)
                 % snip to 10% of the image size
-                snipsize = [ceil(size(obj.values,2)*0.1), ceil(size(obj.values,2)*0.1)];
+                snipsize = [ceil(max(size(obj.values))*0.1), ceil(max(size(obj.values))*0.1)];
                 snipsize = snipsize + (~mod(snipsize,2));
             elseif isscalar(snipsize)
                 % make single input a square box of the same width
@@ -201,6 +201,47 @@ classdef IRImage < hgsetget
         % ---------------------------------------------------------------------------------------- %
         function obj = rmr(obj)
             obj.values = double(obj.values) - repmat(mean(obj.values,2), [1 size(obj.values,2)]);
+        end
+        
+        % ---------------------------------------------------------------------------------------- %
+        % THRESHOLDING
+        % ---------------------------------------------------------------------------------------- %
+        function obj = thresh(obj, T)
+            % THRESH Cut out a section of an image.
+            %   THRESH(OBJ, T) thresholds the image to the single value or the
+            %   array of values in T.  The output image writes pixels starting 
+            %   from 0,1,2,...,N.
+            %
+            %   Ex: binarize the image such that values less than 10 are 0, and values
+            %       greater than 10 are 1.
+            %
+            %           img.thresh(10);
+            %
+            %   Ex. create a labeled image such that pixels with value...
+            %            x <= 5   --> 0
+            %       5  < x <= 10  --> 1
+            %       10 < x <= 15  --> 2
+            %       15 < x        --> 3
+            %
+            %           img.thresh([5, 10, 15])
+            %
+            %   A.Fite, 2017
+            outImage = obj.values;
+            
+            % require that all values be in ascending order
+            if ~isvector(T) || any(diff(T) <= 0) || ~all(isreal(T))
+                error('Threshold values must be an array of non-repeating, ascending, real numbers.');
+            end
+            
+            % bound the array across all possible values
+            try T = [-Inf T Inf]; catch, T = [-Inf; T; Inf]; end
+            
+            % apply thresholds
+            for i = 1:length(T)-1
+                outImage(obj.values > T(i) & obj.values <= T(i+1)) = i-1;
+            end
+            
+            obj.values = outImage;
         end
         
         % ---------------------------------------------------------------------------------------- %
@@ -320,9 +361,6 @@ classdef IRImage < hgsetget
             obj.savedData = [];
             obj.azL       = [];
             obj.elL       = [];
-        end
-        
-        function obj = loadFromFile(obj, filepath)
         end
         
         function obj = padsChanged(~, event)
