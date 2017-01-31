@@ -1,4 +1,4 @@
-classdef IRImage < hgsetget
+classdef IRImage < handle
     %IRIMAGE Class for grayscale image manipulation.
     %   IMG = IRImage(<MxN array>) creates a reference to an IRImage object
     %   with three public properties:
@@ -41,8 +41,8 @@ classdef IRImage < hgsetget
             obj = erase(obj);
             
             % add listeners
-            addlistener(obj, 'pads', 'PostSet', @IRImage.padsChanged);   
-            addlistener(obj, 'mirror', 'PostSet', @IRImage.mirrorChanged);   
+            addlistener(obj, 'pads', 'PostSet', @(src, evnt) obj.padsChanged);   
+            addlistener(obj, 'mirror', 'PostSet', @(src, evnt) obj.mirrorChanged);   
             
             if nargin < 1, return; end
             
@@ -158,7 +158,7 @@ classdef IRImage < hgsetget
                 snipsize = snipsize + (~mod(snipsize,2));
             elseif isscalar(snipsize)
                 % make single input a square box of the same width
-                snipsize = repmat(snipsize, [1 2]);
+                snipsize = [snipsize snipsize];
             end
             
             % check for valid input for the size window (odd integers)
@@ -218,10 +218,10 @@ classdef IRImage < hgsetget
             %           img.thresh(10);
             %
             %   Ex. create a labeled image such that pixels with value...
-            %            x <= 5   --> 0
-            %       5  < x <= 10  --> 1
-            %       10 < x <= 15  --> 2
-            %       15 < x        --> 3
+            %            x  < 5   --> 0
+            %       5  <= x < 10  --> 1
+            %       10 <= x < 15  --> 2
+            %       15 <= x       --> 3
             %
             %           img.thresh([5, 10, 15])
             %
@@ -238,7 +238,7 @@ classdef IRImage < hgsetget
             
             % apply thresholds
             for i = 1:length(T)-1
-                outImage(obj.values > T(i) & obj.values <= T(i+1)) = i-1;
+                outImage(obj.values >= T(i) & obj.values < T(i+1)) = i-1;
             end
             
             obj.values = outImage;
@@ -363,8 +363,7 @@ classdef IRImage < hgsetget
             obj.elL       = [];
         end
         
-        function obj = padsChanged(~, event)
-            obj = event.AffectedObject;
+        function obj = padsChanged(obj, ~, ~)
             
             % allow the user to input a single value for all the pads, (e.g. pads = 3 --> [3 3 3 3])
             if ~isempty(obj.pads) && isscalar(obj.pads)
@@ -392,8 +391,8 @@ classdef IRImage < hgsetget
                             % ABANDONED FOR NOW -- not sure if this is a good idea...
                             %
                             % e.g. the last pad was -5 and we now want a pad of -2.  the region
-                            % between -5:-3 has already been set to zero, so we'll need to use the
-                            % saved image state to try and recover that lost information
+                            % between -5:-3 has already been removed, so we'll need to use the
+                            % saved image state to try and recover that lost information...
                             % x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x 
                             switch side
                                 case 1 % TOP (in image coordinates, datum at top-left corner)
@@ -407,13 +406,13 @@ classdef IRImage < hgsetget
                             % removed by pads.
                             switch side
                                 case 1 % TOP (in image coordinates, datum at top-left corner)
-                                    obj.values((abs(obj.lastpads(side))+1):(abs(obj.lastpads(side))-padUpdate(side)), :) = 0;
+                                    obj.values((abs(obj.lastpads(side))+1):(abs(obj.lastpads(side))-padUpdate(side)), :) = NaN;
                                 case 2 % BOT
-                                    obj.values((size(obj.values,1)-abs(obj.lastpads(side))+padUpdate(side)+1):end, :) = 0;
+                                    obj.values((size(obj.values,1)-abs(obj.lastpads(side))+padUpdate(side)+1):end, :) = NaN;
                                 case 3 % LEFT
-                                    obj.values(:, (abs(obj.lastpads(side))+1):(abs(obj.lastpads(side))-padUpdate(side))) = 0;
+                                    obj.values(:, (abs(obj.lastpads(side))+1):(abs(obj.lastpads(side))-padUpdate(side))) = NaN;
                                 case 4 % RIGHT
-                                    obj.values(:, (size(obj.values,2)-abs(obj.lastpads(side))+padUpdate(side)+1):end) = 0;
+                                    obj.values(:, (size(obj.values,2)-abs(obj.lastpads(side))+padUpdate(side)+1):end) = NaN;
                             end
                         end
                     end
@@ -423,7 +422,7 @@ classdef IRImage < hgsetget
                 % (( current size + (positive padding requested) - (previous padding) ))
                 tempImageRows = size(obj.values,1)+max(0,obj.pads(1))+max(0,obj.pads(2))-max(0,obj.lastpads(1))-max(0,obj.lastpads(2));
                 tempImageColumns = size(obj.values,2)+max(0,obj.pads(3))+max(0,obj.pads(4))-max(0,obj.lastpads(3))-max(0,obj.lastpads(4));
-                tempImage(tempImageRows, tempImageColumns) = 0;
+                tempImage = NaN(tempImageRows, tempImageColumns);
                 
                 % for the purposes of placing the original image, negative pads are irrelevant
                 tpads = obj.pads;
@@ -454,8 +453,7 @@ classdef IRImage < hgsetget
             end
         end
         
-        function obj = mirrorChanged(~, event)
-            obj = event.AffectedObject;
+        function obj = mirrorChanged(obj, ~, ~)
             
             if ~isempty(obj.mirror) && isscalar(obj.mirror)
                 obj.mirror = repmat(obj.mirror, 1, 4);
@@ -514,6 +512,25 @@ classdef IRImage < hgsetget
     
     %% KERNELS (STATIC METHODS)
     methods (Static, Access = public)
+        % ---------------------------------------------------------------------------------------- %
+        % BOX (MEAN FILTER) (1D/2D FILTER)
+        % ---------------------------------------------------------------------------------------- %
+        function kernel = box(M,N)
+            % BOX Create a simple box/mean filter kernel.
+            %   K = BOX([M N]) creates an MxN mean filter.
+            %   K = BOX(N) creates an NxN mean filter.
+            %
+            %   A.Fite, 2017
+            if nargin == 2 && isscalar(N)
+                K = [M N];
+            elseif isscalar(N)
+                K = [M M];
+            end
+            
+            kernel = ones(K);
+            kernel = kernel/sum(kernel(:));
+        end
+        
         % ---------------------------------------------------------------------------------------- %
         % GAUSSIAN BOX FILTER KERNEL (2D FILTER)
         % ---------------------------------------------------------------------------------------- %
