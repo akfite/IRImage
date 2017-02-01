@@ -314,43 +314,106 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         function obj = resize(obj, rows, cols)
             % check that toolbox exists
-            if ~license('test','image_toolbox')
+            if license('test','image_toolbox')
+                
+                % toolbox exists, continue as normal
+                if nargin < 3 && numel(rows) == 2
+                    cols = rows(2);
+                    rows = rows(1);
+                end
+
+                % if the current image is empty, just initialize to zeros.
+                if isempty(obj.values)
+                    obj.values = zeros(rows, cols);
+                else
+                    % if pads exist, this operation will destroy them.  warn the user
+                    if any(obj.pads ~= 0)
+                        warning('Resizing an image while pads are applied will cause the pads to become a fixed part of the image!');
+                        qans = '';
+                        while ~strcmpi(qans, 'y') && ~strcmpi(qans, 'n')
+                            qans = regexprep(input('Would you still like to resize? (y/n): ','s'), '\w','');
+                        end
+
+                        switch qans
+                            case 'y'
+                                obj.values   = imresize(obj.values, [rows cols]);
+                                obj.lastpads = [0 0 0 0];
+                                obj.pads     = [0 0 0 0];
+                            case 'n'
+                                fprintf('Image resize operation aborted with no action taken.\n')
+                        end
+                    end
+                end
+                
+            else
+                % no image processing toolbox
                 stack = dbstack;
                 error('The Image Processing Toolbox is required for %s', stack(1).name);
             end
-            
-            if nargin < 3 && numel(rows) == 2
-                cols = rows(2);
-                rows = rows(1);
+        end
+        
+        
+        % ---------------------------------------------------------------------------------------- %
+        % MEDIAN FILTER
+        % ---------------------------------------------------------------------------------------- %
+        function obj = median(obj, varargin)
+            if ~isempty(varargin)
+                nhood = varargin{1};
+                varargin(1) = [];
+                
+                % allow user to call in [m n] form or just with [m] -> [m m]
+                if isscalar(nhood)
+                    nhood = [nhood nhood];
+                end
+            else
+                % default when no filter size is specified
+                nhood = [3 3];
             end
             
-            % if the current image is empty, just initialize to zeros.
-            if isempty(obj.values)
-                obj.values = zeros(rows, cols);
-            else
-                % if pads exist, this operation will destroy them.  warn the user
-                if any(obj.pads ~= 0)
-                    warning('Resizing an image while pads are applied will cause the pads to become a fixed part of the image!');
-                    qans = '';
-                    while ~strcmpi(qans, 'y') && ~strcmpi(qans, 'n')
-                        qans = regexprep(input('Would you still like to resize? (y/n): ','s'), '\w','');
-                    end
-
-                    switch qans
-                        case 'y'
-                            obj.values   = imresize(obj.values, [rows cols]);
-                            obj.lastpads = [0 0 0 0];
-                            obj.pads     = [0 0 0 0];
-                        case 'n'
-                            fprintf('Image resize operation aborted with no action taken.\n')
+            % check that toolbox exists
+            if ~license('test','image_toolbox')
+                obj.values = medfilt2(obj.values, varargin{:});
+            else 
+                % display a warning only once
+                warning('MATLAB:IRImage:MissingToolbox',...
+                    'Image Processing Toolbox not found.  Defaulting to inefficient method...');
+                warning('off','MATLAB:IRImage:MissingToolbox');
+                
+                % no image processing toolbox--do it the hard & inefficient way
+                hx = floor(nhood(1)/2);
+                hy = floor(nhood(2)/2);
+                imWidth = size(obj.values,2);
+                imHeight = size(obj.values,1);
+                
+                % initialize output image
+                medImage = nan(size(obj.values));
+                
+                for iRow = 1:size(obj.values,1)
+                    for iCol = 1:size(obj.values,2)
+                        % skip nans (pads)
+                        if isnan(obj.values(iRow,iCol)), continue; end
+                        
+                        % find the median at this point
+                        rowrange = max(1, (iRow-hy)):min(imHeight, (iRow+hy));
+                        colrange = max(1, (iCol-hx)):min(imWidth, (iCol+hx));
+                        pixNHood = obj.values(rowrange, colrange);
+                        
+                        % write to output image 
+                        medImage(iRow,iCol) = median(pixNHood(:),'omitnan');
                     end
                 end
+                
+                % assign to object values
+                obj.values = medImage;
             end
         end
     end
     
     %% PRIVATE METHODS
     methods (Access = private)
+        % ---------------------------------------------------------------------------------------- %
+        % ERASE ALL VALUES
+        % ---------------------------------------------------------------------------------------- %
         function obj = erase(obj)
             % public
             obj.values   = [];
@@ -363,6 +426,9 @@ classdef IRImage < handle
             obj.elL       = [];
         end
         
+        % ---------------------------------------------------------------------------------------- %
+        % LISTENER CALLBACK ON 'PADS' PROPERTY
+        % ---------------------------------------------------------------------------------------- %
         function obj = padsChanged(obj, ~, ~)
             
             % allow the user to input a single value for all the pads, (e.g. pads = 3 --> [3 3 3 3])
@@ -453,6 +519,9 @@ classdef IRImage < handle
             end
         end
         
+        % ---------------------------------------------------------------------------------------- %
+        % LISTENER CALLBACK ON 'MIRROR' PROPERTY
+        % ---------------------------------------------------------------------------------------- %
         function obj = mirrorChanged(obj, ~, ~)
             
             if ~isempty(obj.mirror) && isscalar(obj.mirror)
@@ -523,7 +592,7 @@ classdef IRImage < handle
             %   A.Fite, 2017
             if nargin == 2 && isscalar(N)
                 K = [M N];
-            elseif isscalar(N)
+            elseif isscalar(M)
                 K = [M M];
             end
             
