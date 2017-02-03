@@ -50,37 +50,34 @@ classdef IRImage < handle
             if ~isempty(inputImage)
                 switch class(inputImage)
                     case {'char', 'string'}
-                        % try to load from file and automatically determine settings based on 
-                        % the file extension.  not the most reliable way to load, but convenient
-                        filepath = inputImage;
-                        if ~exist(filepath,'file')
-                            error('Unable to read file ''%s''.  No such file exists.', filepath);
-                        end
-
                         % change behavior based on the filepath provided
-                        [~, filename, ext] = fileparts(filepath); %#ok<*ASGLU>
+                        [filepath, filename, ext] = fileparts(inputImage); %#ok<*ASGLU>
 
                         switch lower(ext)
-                            case {'.tif','.tiff','.png','.jpg','.bmp','.gif','.jpeg','.jp2','.jpx'}
-                                % load into a temporary var first
-                                img = imread(filepath);
-
-                                % make sure it's a grayscale image.  if not, flatten it
-                                if size(img,3) == 3
-                                    img = rgb2gray(img);
-                                elseif ~ismatrix(img)
-                                    error('Multidimensional data types are not supported.  (NDIMS > 2)')
-                                end
-
-                                % assign to the object
-                                obj.values = img;
-                                obj.savedData = obj.values;
                             case '.mat'
                                 % placeholder
                                 error('.mat decoding is not supported at this time.');
                             case '.raw'
                                 % might add raw decoding later
                                 error('.raw decoding is not supported at this time.');
+                            otherwise
+                                try
+                                    % try to load with imread
+                                    img = imread(inputImage);
+
+                                    % make sure it's a grayscale image.  if not, flatten it
+                                    if size(img,3) == 3
+                                        img = rgb2gray(img);
+                                    elseif ~ismatrix(img)
+                                        error('Multidimensional data types are not supported.  (NDIMS > 2)')
+                                    end
+
+                                    % assign to the object
+                                    obj.values = img;
+                                    obj.savedData = obj.values;
+                                catch err
+                                    rethrow(err);
+                                end
                         end
                         
                     case 'cell'
@@ -103,6 +100,14 @@ classdef IRImage < handle
                         % return the array of objects
                         obj = imArray;
                     otherwise
+                        % make sure it's a grayscale image.  if not, flatten it
+                        if size(inputImage,3) == 3
+                            inputImage = rgb2gray(inputImage);
+                        elseif ~ismatrix(inputImage)
+                            error('Multidimensional data types are not supported.  (NDIMS > 2)')
+                        end
+                        
+                        % all good.  assign to object
                         obj.values = inputImage;
                         obj.savedData = inputImage;
                                 
@@ -658,6 +663,33 @@ classdef IRImage < handle
             % force the kernel to have a unit volume of 1
             kernel = kernel/sum(kernel(:));
         end
+        
+        
+        % ---------------------------------------------------------------------------------------- %
+        % TRIANGLE FILTER
+        % ---------------------------------------------------------------------------------------- %
+        function kernel = tri(N)
+            % TRI Create a 1D triangle filter kernel.
+            %   K = TRI(N) creates a 1xN triangle filter by convolving
+            %   two box filters.  The output is normalized to have a
+            %   unit volume.
+            %
+            %   A.Fite, 2017
+            
+            if ~isscalar(N) || N <= 1 || mod(N,2) ~= 1
+                error('Invalid input.  N must be an odd integer greater than 1.');
+            end
+            
+            % the two box filters will each be half the total width
+            halfsize = ceil(N/2);
+            
+            % convolve two box filters to create the triangle filter
+            kernel = conv(ones(1,halfsize), ones(1,halfsize));
+            
+            % normalize
+            kernel = kernel/sum(kernel(:));
+        end
+        
     end
     
     %% ACCESSORS
