@@ -207,7 +207,7 @@ classdef IRImage < handle
         % THRESHOLDING
         % ---------------------------------------------------------------------------------------- %
         function obj = thresh(obj, T)
-            % THRESH Cut out a section of an image.
+            % THRESH Binarize the image to one or more thresholds.
             %   THRESH(OBJ, T) thresholds the image to the single value or the
             %   array of values in T.  The output image writes pixels starting 
             %   from 0,1,2,...,N.
@@ -356,7 +356,7 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         % MEDIAN FILTER
         % ---------------------------------------------------------------------------------------- %
-        function obj = median(obj, varargin)
+        function obj = med(obj, varargin)
             if ~isempty(varargin)
                 nhood = varargin{1};
                 varargin(1) = [];
@@ -776,6 +776,47 @@ classdef IRImage < handle
             else
                 arg1 = a;
             end
+        end
+        
+        % ---------------------------------------------------------------------------------------- %
+        % DISPLAY METHOD
+        % ---------------------------------------------------------------------------------------- %
+        function disp(obj)
+            if isvalid(obj)
+                % object still exists
+                fprintf('\t<a href="matlab:helpPopup IRImage">IRImage</a> with properties:\n\n');
+                fprintf('\t%10s: [%dx%d %s]\n', 'values', size(obj.values,1), size(obj.values,2), class(obj.values));
+                fprintf('\t%10s: [%d %d %d %d]\n', 'pads', obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4));
+                fprintf('\t%10s: [%d %d %d %d]\n', 'mirror', obj.mirror(1), obj.mirror(2), obj.mirror(3), obj.mirror(4));
+                fprintf('\t%10s: %3.5f\n', 'max', double(max(obj.values(:))));
+                fprintf('\t%10s: %3.5f\n', 'min', double(min(obj.values(:))));
+                fprintf('\n');
+                fprintf('\tList custom <a href="matlab: methods(IRImage)">methods</a> for IRImage or show <a href="matlab: methods IRImage">all</a>.\n\n');
+            else
+                % object has been deleted
+                fprintf('\thandle to deleted <a href="matlab:helpPopup IRImage">IRImage</a>\n');
+                fprintf('\n');
+            end
+        end
+        
+        function methods(obj)
+            fprintf('\nCustom methods for class IRImage:\n\n');
+            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.filt">filt</a>', 'convolve with a kernel');
+            fprintf('\t%52s: %s\n', '<a href="matlab:helpPopup IRImage.sfilt">sfilt</a>', 'convolve, then subtract');
+            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.snip">snip</a>', 'cut out a section of the image');
+            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'binarize to a threshold(s)');
+            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.copy">copy</a>', 'clone the object');
+            
+            % KERNELS
+            fprintf('\nKernel generation (static methods):\n\n');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.box">box</a>', 'mean filter');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.gauss2d">gauss2d</a>', '2D approximation to gaussian');
+            
+            % FILTERS
+            fprintf('\nFilters with no kernel required:\n\n');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.rmr">rmr</a>', 'row mean removal');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.med">med</a>', 'median filter');
+            fprintf('\n');
         end
     end
     
