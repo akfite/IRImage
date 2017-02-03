@@ -167,10 +167,15 @@ classdef IRImage < handle
             end
             
             % check for valid input for the size window (odd integers)
-            if length(snipsize) ~= 2 || ~all(mod(snipsize,2) == 1) || any(isnan(snipsize))
-                error('Invalid size window input.  All values must be odd integers.');
+            if length(snipsize) ~= 2 || any(isnan(snipsize)) || any(snipsize <= 0)
+                error('Invalid SIZE input.  SIZE must be a scalar or 1x2 array of odd integers.');
             end
             
+            % force the window size to be odd integers
+            snipsize = ceil(snipsize);
+            snipsize(mod(snipsize,2) == 0) = snipsize(mod(snipsize,2) == 0) + 1;
+            
+            % no subpixel shenanigans for this
             x = floor(x);
             y = floor(y);
             
@@ -223,7 +228,7 @@ classdef IRImage < handle
             %           img.thresh(10);
             %
             %   Ex. create a labeled image such that pixels with value...
-            %            x  < 5   --> 0
+            %             x  < 5   --> 0
             %       5  <= x < 10  --> 1
             %       10 <= x < 15  --> 2
             %       15 <= x       --> 3
@@ -253,35 +258,29 @@ classdef IRImage < handle
         % 1D/2D CORRELATION FILTER
         % ---------------------------------------------------------------------------------------- %
         function obj = filt(obj, filter)
-            if ~isempty(filter) && isscalar(filter) && ~isnan(filter)
-                if mod(filter,2) ~= 0
-                    % when given an integer, create a 1-D filter
-                    filter = ones(1,filter)/filter;
-                else
-                    % no funny business
-                    error('Filter dimensions must be odd!  %d is not a valid size.',filter)
-                end
-            end
+            % FILT Apply a filter to the image.
+            %   FILT(OBJ, K) performs the 2D convolution between
+            %   the image held by OBJ and the kernel K.
+            %
+            %   A.Fite, 2017
             
             % apply the filter
-            obj.values = filter2(filter, double(obj.values), 'same');
+            obj.values = conv2(double(obj.values), filter, 'same');
         end
         
         % ---------------------------------------------------------------------------------------- %
         % 1D/2D SUBTRACTIVE CORRELATION FILTER (filter, then subtract from original image)
         % ---------------------------------------------------------------------------------------- %
         function obj = sfilt(obj, filter)
-            if ~isempty(filter) && isscalar(filter) && ~isnan(filter)
-                % when given an integer, create a 1-D filter
-                if mod(filter,2) ~= 0
-                    filter = ones(1,filter)/filter;
-                else
-                    error('Filter dimensions must be odd!  %d is not a valid size.',filter)
-                end
-            end
-            
-            % apply the filter
-            obj.values = double(obj.values) - filter2(filter, double(obj.values), 'same');
+            % SFILT Subtract a filtered image from the original.
+            %   SFILT(OBJ, K) performs the 2D convolution between
+            %   the image held by OBJ and the kernel K, then
+            %   subtracts the result from the original image.
+            %
+            %   A.Fite, 2017
+
+            % apply the filter, then subtract from the original image
+            obj.values = double(obj.values) - conv2(double(obj.values), filter, 'same');
         end
         
         % ---------------------------------------------------------------------------------------- %
@@ -292,9 +291,13 @@ classdef IRImage < handle
             F = fftshift(F); % center the transform at 0,0
             F = sqrt(real(F).^2 + imag(F).^2); % take the magnitude
             F = log(F+1); % need to reduce the dynamic range and log() is undefined at 0
-            figure; imshow(F,[]);
-            if nargout > 1, out = F; end
-            colormap gray
+           
+            % only generate a plot if no output is requested
+            if nargout > 0
+                out = F;
+            else
+                figure; imagesc(F); colormap gray
+            end
         end
         
         % ---------------------------------------------------------------------------------------- %
@@ -315,53 +318,30 @@ classdef IRImage < handle
     %% PUBLIC REQUIRING IMAGE TOOLBOX
     methods (Access = public)
         % ---------------------------------------------------------------------------------------- %
-        % RESIZING
-        % ---------------------------------------------------------------------------------------- %
-        function obj = resize(obj, rows, cols)
-            % check that toolbox exists
-            if license('test','image_toolbox')
-                
-                % toolbox exists, continue as normal
-                if nargin < 3 && numel(rows) == 2
-                    cols = rows(2);
-                    rows = rows(1);
-                end
-
-                % if the current image is empty, just initialize to zeros.
-                if isempty(obj.values)
-                    obj.values = zeros(rows, cols);
-                else
-                    % if pads exist, this operation will destroy them.  warn the user
-                    if any(obj.pads ~= 0)
-                        warning('Resizing an image while pads are applied will cause the pads to become a fixed part of the image!');
-                        qans = '';
-                        while ~strcmpi(qans, 'y') && ~strcmpi(qans, 'n')
-                            qans = regexprep(input('Would you still like to resize? (y/n): ','s'), '\w','');
-                        end
-
-                        switch qans
-                            case 'y'
-                                obj.values   = imresize(obj.values, [rows cols]);
-                                obj.lastpads = [0 0 0 0];
-                                obj.pads     = [0 0 0 0];
-                            case 'n'
-                                fprintf('Image resize operation aborted with no action taken.\n')
-                        end
-                    end
-                end
-                
-            else
-                % no image processing toolbox
-                stack = dbstack;
-                error('The Image Processing Toolbox is required for %s', stack(1).name);
-            end
-        end
-        
-        
-        % ---------------------------------------------------------------------------------------- %
         % MEDIAN FILTER
         % ---------------------------------------------------------------------------------------- %
         function obj = med(obj, varargin)
+            % MED Apply a median filter to the image.
+            %   MED(N,...) applies an NxN median filter.
+            %   MED([M N],...) applies an MxN median filter.
+            %
+            %   The median filter is a non-linear operation that
+            %   is typically used to remove noise from an image.
+            %   If the image processing toolbox is available, the
+            %   user may specifiy any optional inputs that can be
+            %   used with the "medfilt2" function. If the toolbox
+            %   is not available, it will default to a slower
+            %   MATLAB implementation of the median filter with
+            %   no options supported.
+            %
+            %   Ex. 
+            %       img = load('clown');
+            %       img = IRImage(img.X);
+            %       img.med([3 5]);  % apply a 3x5 median filter
+            %       img.med(3);      % apply a 3x3 median filter
+            %
+            %   A.Fite, 2017
+            
             if ~isempty(varargin)
                 nhood = varargin{1};
                 varargin(1) = [];
@@ -376,7 +356,7 @@ classdef IRImage < handle
             end
             
             % check that toolbox exists
-            if ~license('test','image_toolbox')
+            if license('test','image_toolbox')
                 obj.values = medfilt2(obj.values, varargin{:});
             else 
                 % display a warning only once
@@ -393,8 +373,8 @@ classdef IRImage < handle
                 % initialize output image
                 medImage = nan(size(obj.values));
                 
-                for iRow = 1:size(obj.values,1)
-                    for iCol = 1:size(obj.values,2)
+                for iRow = 1:imHeight
+                    for iCol = 1:imWidth
                         % skip nans (pads)
                         if isnan(obj.values(iRow,iCol)), continue; end
                         
@@ -412,6 +392,112 @@ classdef IRImage < handle
                 obj.values = medImage;
             end
         end
+    end
+    
+    
+    %% KERNELS (STATIC METHODS)
+    methods (Static, Access = public)
+        % ---------------------------------------------------------------------------------------- %
+        % BOX (MEAN FILTER) (1D/2D FILTER)
+        % ---------------------------------------------------------------------------------------- %
+        function kernel = box(M,N)
+            % BOX Create a simple box/mean filter kernel.
+            %   K = BOX(N) creates an NxN mean filter.
+            %   K = BOX([M N]) creates an MxN mean filter.
+            %
+            %   A.Fite, 2017
+            if nargin == 2 && isscalar(N)
+                K = [M N];
+            elseif isscalar(M)
+                K = [M M];
+            end
+            
+            kernel = ones(K);
+            kernel = kernel/sum(kernel(:));
+        end
+        
+        % ---------------------------------------------------------------------------------------- %
+        % GAUSSIAN BOX FILTER KERNEL (2D FILTER)
+        % ---------------------------------------------------------------------------------------- %
+        function kernel = gauss2d(N,sigma)
+            % GAUSS2D Create a 2-D gaussian filter in pixel space.
+            %   K = GAUSS2D(N,SIGMA) creates an NxN kernel K which approximates
+            %   a multivariate Gaussian distribution with a mean of zero and 
+            %   a standard deviation of SIGMA.  The function is bounded on the
+            %   x/y range [-3,3] regardless of the value of SIGMA.
+            %   
+            %   When convolved with an image, a 2-D Gaussian filter applies 
+            %   a blurring effect similar to a mean filter.  However, in contrast
+            %   to a mean filter, the Gaussian is weighted towards the center and
+            %   thus is more effective at preserving high-frequency edge content.
+            %
+            %   To apply this kernel to an image inside an IRImage object, use the
+            %   primary filtering methods: filt and sfilt. 
+            %   e.g.
+            %       img = IRImage(...);
+            %       img.filt(img.gauss2d(13));
+            %
+            %   Or, as a static method:
+            %       kernel = IRImage.gauss2d(13);
+            %
+            %   A.Fite, 2017
+            
+            if isempty(N) || ~isscalar(N) || isnan(N) || N <= 1 || mod(N,2) ~= 1
+                error('The kernel width must be an odd integer greater than 1.');
+            end
+            
+            if nargin < 2, sigma = 1; end
+            
+            % initialize the output kernel 
+            kernel = nan(N);
+            
+            % create a 2D gaussian with mean of zero and standard deviation of 1
+            % important to note is that the resolution of the gaussian scales with kernel size
+            scalefactor = 25;
+            dim = linspace(-3,3,N*scalefactor);
+            [x,y] = meshgrid(dim, dim);
+            P = 1/(2 * sqrt(2*pi)*sigma) * exp(-(x.^2 + y.^2)./(2*sigma^2));
+            
+            % now divide the gaussian into a grid the size of the output kernel
+            gridStart = 1:scalefactor:(N*scalefactor);
+            gridEnd   = scalefactor:scalefactor:(N*scalefactor);
+            
+            % integrate by summing over each tile in the grid and write the integral to a pixel
+            % in the output kernel
+            for iRow = 1:N
+                for iCol = 1:N
+                    activeTile = P(gridStart(iRow):gridEnd(iRow), gridStart(iCol):gridEnd(iCol));
+                    kernel(iRow,iCol) = sum(activeTile(:));
+                end
+            end
+            
+            % force the kernel to have a unit volume of 1
+            kernel = kernel/sum(kernel(:));
+        end
+        
+        
+        % ---------------------------------------------------------------------------------------- %
+        % TRIANGLE FILTER
+        % ---------------------------------------------------------------------------------------- %
+        function kernel = tri(N)
+            % TRI Create a 1D triangle filter kernel.
+            %   K = TRI(N) creates a 1xN triangle filter by convolving
+            %   two box filters.  The output is normalized to have a
+            %   unit volume.
+            %
+            %   A.Fite, 2017
+            
+            if ~isscalar(N) || N <= 1 || mod(N,2) ~= 1
+                error('Invalid input.  N must be an odd integer greater than 1.');
+            end
+            
+            % convolve two box filters to create the triangle filter
+            kernel = conv(ones(1,ceil(N/2)), ones(1,ceil(N/2)));
+            
+            % normalize
+            kernel = kernel/sum(kernel(:));
+        end
+        
     end
     
     %% PRIVATE METHODS
@@ -583,115 +669,6 @@ classdef IRImage < handle
         
     end
     
-    
-    %% KERNELS (STATIC METHODS)
-    methods (Static, Access = public)
-        % ---------------------------------------------------------------------------------------- %
-        % BOX (MEAN FILTER) (1D/2D FILTER)
-        % ---------------------------------------------------------------------------------------- %
-        function kernel = box(M,N)
-            % BOX Create a simple box/mean filter kernel.
-            %   K = BOX([M N]) creates an MxN mean filter.
-            %   K = BOX(N) creates an NxN mean filter.
-            %
-            %   A.Fite, 2017
-            if nargin == 2 && isscalar(N)
-                K = [M N];
-            elseif isscalar(M)
-                K = [M M];
-            end
-            
-            kernel = ones(K);
-            kernel = kernel/sum(kernel(:));
-        end
-        
-        % ---------------------------------------------------------------------------------------- %
-        % GAUSSIAN BOX FILTER KERNEL (2D FILTER)
-        % ---------------------------------------------------------------------------------------- %
-        function kernel = gauss2d(N,sigma)
-            % GAUSS2D Create a 2-D gaussian filter in pixel space.
-            %   K = GAUSS2D(N,SIGMA) creates an NxN kernel K which approximates
-            %   a multivariate Gaussian distribution with a mean of zero and 
-            %   a standard deviation of SIGMA.  The function is bounded on the
-            %   x/y range [-3,3] regardless of the value of SIGMA.
-            %   
-            %   When convolved with an image, a 2-D Gaussian filter applies 
-            %   a blurring effect similar to a mean filter.  However, in contrast
-            %   to a mean filter, the Gaussian is weighted towards the center and
-            %   thus is more effective at preserving high-frequency edge content.
-            %
-            %   To apply this kernel to an image inside an IRImage object, use the
-            %   primary filtering methods: filt and sfilt. 
-            %   e.g.
-            %       img = IRImage(...);
-            %       img.filt(img.gauss2d(13));
-            %
-            %   Or, as a static method:
-            %       kernel = IRImage.gauss2d(13);
-            %
-            %   A.Fite, 2017
-            
-            if isempty(N) || ~isscalar(N) || isnan(N) || N <= 1 || mod(N,2) ~= 1
-                error('The kernel width must be an odd integer greater than 1.');
-            end
-            
-            if nargin < 2, sigma = 1; end
-            
-            % initialize the output kernel 
-            kernel = nan(N);
-            
-            % create a 2D gaussian with mean of zero and standard deviation of 1
-            % important to note is that the resolution of the gaussian scales with kernel size
-            scalefactor = 25;
-            dim = linspace(-3,3,N*scalefactor);
-            [x,y] = meshgrid(dim, dim);
-            P = 1/(2 * sqrt(2*pi)*sigma) * exp(-(x.^2 + y.^2)./(2*sigma^2));
-            
-            % now divide the gaussian into a grid the size of the output kernel
-            gridStart = 1:scalefactor:(N*scalefactor);
-            gridEnd   = scalefactor:scalefactor:(N*scalefactor);
-            
-            % integrate by summing over each tile in the grid and write the integral to a pixel
-            % in the output kernel
-            for iRow = 1:N
-                for iCol = 1:N
-                    activeTile = P(gridStart(iRow):gridEnd(iRow), gridStart(iCol):gridEnd(iCol));
-                    kernel(iRow,iCol) = sum(activeTile(:));
-                end
-            end
-            
-            % force the kernel to have a unit volume of 1
-            kernel = kernel/sum(kernel(:));
-        end
-        
-        
-        % ---------------------------------------------------------------------------------------- %
-        % TRIANGLE FILTER
-        % ---------------------------------------------------------------------------------------- %
-        function kernel = tri(N)
-            % TRI Create a 1D triangle filter kernel.
-            %   K = TRI(N) creates a 1xN triangle filter by convolving
-            %   two box filters.  The output is normalized to have a
-            %   unit volume.
-            %
-            %   A.Fite, 2017
-            
-            if ~isscalar(N) || N <= 1 || mod(N,2) ~= 1
-                error('Invalid input.  N must be an odd integer greater than 1.');
-            end
-            
-            % the two box filters will each be half the total width
-            halfsize = ceil(N/2);
-            
-            % convolve two box filters to create the triangle filter
-            kernel = conv(ones(1,halfsize), ones(1,halfsize));
-            
-            % normalize
-            kernel = kernel/sum(kernel(:));
-        end
-        
-    end
-    
     %% ACCESSORS
     methods (Access = public)
         function v = rmin(obj)
@@ -716,15 +693,13 @@ classdef IRImage < handle
     methods (Access = public)
         % PLOTTING ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ %
         function h = imagesc(obj, varargin) 
-            % By requesting the plot function on the object rather than the
-            % underlying values, we'll add some extra functionality by linking
-            % the object to the plot axis and auto-updating the axis as the
-            % object changes.
+            % link the image object to the axis & auto-update when values change
             himg = imagesc(obj.values, varargin{:});
             autoUpdateAxes(obj, himg, 'cdata');
             if nargout > 0, h = himg; end
         end
         function h = surf(obj, varargin)
+            % link the image object to the axis & auto-update when values change
             hsurf = surf(obj.values, varargin{:});
             shading(get(hsurf,'parent'),'interp');  
             axis(get(hsurf,'parent'),'tight');
@@ -789,6 +764,19 @@ classdef IRImage < handle
         function obj = ctranspose(obj), obj.values = (obj.values)';  end
         function obj = transpose(obj),  obj.values = (obj.values).'; end
         
+        % IMAGE PROCESSING TOOLBOX FUNCTIONS
+        function obj = imresize(obj, varargin), obj = resize(obj, varargin); end
+        function obj = resize(obj, varargin)
+            % check that toolbox exists
+            if license('test','image_toolbox')
+                obj.values = imresize(obj.values, varargin{:});
+            else
+                % no image processing toolbox
+                stack = dbstack;
+                error('The Image Processing Toolbox is required for %s', stack(1).name);
+            end
+        end
+        
         % ---------------------------------------------------------------------------------------- %
         % HELPER FUNCTION TO DEAL WITH DATA TYPES
         % ---------------------------------------------------------------------------------------- %
@@ -811,7 +799,7 @@ classdef IRImage < handle
         end
         
         % ---------------------------------------------------------------------------------------- %
-        % DISPLAY METHOD
+        % DISPLAY METHODS
         % ---------------------------------------------------------------------------------------- %
         function disp(obj)
             if isvalid(obj)
@@ -820,8 +808,13 @@ classdef IRImage < handle
                 fprintf('\t%10s: [%dx%d %s]\n', 'values', size(obj.values,1), size(obj.values,2), class(obj.values));
                 fprintf('\t%10s: [%d %d %d %d]\n', 'pads', obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4));
                 fprintf('\t%10s: [%d %d %d %d]\n', 'mirror', obj.mirror(1), obj.mirror(2), obj.mirror(3), obj.mirror(4));
-                fprintf('\t%10s: %3.5f\n', 'max', double(max(obj.values(:))));
-                fprintf('\t%10s: %3.5f\n', 'min', double(min(obj.values(:))));
+                if ismember(class(obj.values), {'uint8','uint16','uint32','uint64','int8','int16','int32','int64','logical'})
+                    fprintf('\t%10s: %d\n', 'max', max(obj.values(:)));
+                    fprintf('\t%10s: %d\n', 'min', min(obj.values(:)));
+                else
+                    fprintf('\t%10s: %3.5f\n', 'max', max(obj.values(:)));
+                    fprintf('\t%10s: %3.5f\n', 'min', min(obj.values(:)));
+                end
                 fprintf('\n');
                 fprintf('\tList custom <a href="matlab: methods(IRImage)">methods</a> for IRImage or show <a href="matlab: methods IRImage">all</a>.\n\n');
             else
@@ -831,21 +824,29 @@ classdef IRImage < handle
             end
         end
         
-        function methods(obj)
-            fprintf('\nCustom methods for class IRImage:\n\n');
-            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.filt">filt</a>', 'convolve with a kernel');
-            fprintf('\t%52s: %s\n', '<a href="matlab:helpPopup IRImage.sfilt">sfilt</a>', 'convolve, then subtract');
+        function methods(obj) %#ok<*MANU>
+            fprintf('\n');
+            fprintf('General-purpose methods for class IRImage:');
+            fprintf('\n\n');
+            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.filt">filt</a>', 'convolve the image with a kernel');
+            fprintf('\t%52s: %s\n', '<a href="matlab:helpPopup IRImage.sfilt">sfilt</a>', 'convolve, then subtract from original image');
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.snip">snip</a>', 'cut out a section of the image');
-            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'binarize to a threshold(s)');
+            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'binarize to one or more thresholds');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.fft">fft</a>', 'plot the 2D fourier transform');
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.copy">copy</a>', 'clone the object');
             
             % KERNELS
-            fprintf('\nKernel generation (static methods):\n\n');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.box">box</a>', 'mean filter');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.gauss2d">gauss2d</a>', '2D approximation to gaussian');
+            fprintf('\n');
+            fprintf('Kernel generation (static methods):');
+            fprintf('\n\n');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.box">box</a>', 'box blur kernel (mean filter)');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.gauss2d">gauss2d</a>', 'gaussian kernel');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.tri">tri</a>', 'triangle filter kernel');
             
             % FILTERS
-            fprintf('\nFilters with no kernel required:\n\n');
+            fprintf('\n');
+            fprintf('Methods to directly apply a filter:');
+            fprintf('\n\n');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.rmr">rmr</a>', 'row mean removal');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.med">med</a>', 'median filter');
             fprintf('\n');
