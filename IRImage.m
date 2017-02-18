@@ -421,15 +421,10 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         function kernel = gauss2d(N,sigma)
             % GAUSS2D Create a 2-D gaussian filter in pixel space.
-            %   K = GAUSS2D(N,SIGMA) creates an NxN kernel K which approximates
-            %   a multivariate Gaussian distribution with a mean of zero and 
-            %   a standard deviation of SIGMA.  The function is bounded on the
-            %   x/y range [-3,3] regardless of the value of SIGMA.
-            %   
-            %   When convolved with an image, a 2-D Gaussian filter applies 
-            %   a blurring effect similar to a mean filter.  However, in contrast
-            %   to a mean filter, the Gaussian is weighted towards the center and
-            %   thus is more effective at preserving high-frequency edge content.
+            %   K = GAUSS2D(N,SIGMA,RANGE) creates an NxN kernel K which approximates
+            %   a multivariate gaussian distribution.  The function is bounded 
+            %   on the range [-3,3] in x & y such that with the default SIGMA
+            %   value of 1, the gaussian will always precisely fill the kernel.
             %
             %   To apply this kernel to an image inside an IRImage object, use the
             %   primary filtering methods: filt and sfilt. 
@@ -474,7 +469,6 @@ classdef IRImage < handle
             % force the kernel to have a unit volume of 1
             kernel = kernel/sum(kernel(:));
         end
-        
         
         % ---------------------------------------------------------------------------------------- %
         % TRIANGLE FILTER
@@ -816,7 +810,7 @@ classdef IRImage < handle
                     fprintf('\t%10s: %3.5f\n', 'min', min(obj.values(:)));
                 end
                 fprintf('\n');
-                fprintf('\tList custom <a href="matlab: methods(IRImage)">methods</a> for IRImage or show <a href="matlab: methods IRImage">all</a>.\n\n');
+                fprintf('\tList <a href="matlab: methods(IRImage)">custom methods</a> for IRImage or show the <a href="matlab: methods IRImage">full list</a>.\n\n');
             else
                 % object has been deleted
                 fprintf('\thandle to deleted <a href="matlab:helpPopup IRImage">IRImage</a>\n');
@@ -831,7 +825,7 @@ classdef IRImage < handle
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.filt">filt</a>', 'convolve the image with a kernel');
             fprintf('\t%52s: %s\n', '<a href="matlab:helpPopup IRImage.sfilt">sfilt</a>', 'convolve, then subtract from original image');
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.snip">snip</a>', 'cut out a section of the image');
-            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'binarize to one or more thresholds');
+            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'threshold to one or more values');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.fft">fft</a>', 'plot the 2D fourier transform');
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.copy">copy</a>', 'clone the object');
             
