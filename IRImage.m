@@ -1,37 +1,20 @@
 classdef IRImage < handle
     %IRIMAGE Class for grayscale image manipulation.
-    %   IMG = IRImage(<MxN array>) creates a reference to an IRImage object
-    %   with three public properties:
-    %       1) values
-    %       2) mirror   (TOP, BOT, LEFT, RIGHT)
-    %       3) pads     (TOP, BOT, LEFT, RIGHT)
-    %
-    %   While traditionally we would operate on the IMG.values prop, here you 
-    %   can interact directly with the IMG object itself.  For example, any math
-    %   operation and most plotting functions can be used as follows:
-    %       img = IRImage(rand(200,200)); 
-    %       img = img * 1.1; 
-    %       img.^2;  % image is squared just as if we called "img = img.^2"
-    %   Of course, the traditional syntax is still valid:
-    %       img.values = img.values * 1.1;
-    %   
-    %   PADS & MIRRORS
-    %   Often when filtering an image we are forced to deal with images whose
-    %   valid area shrinks as filters are applied.  Usually the invalid "padded"
-    %   region is ignored or 
+    %   img = IRImage(<MxN array>) creates a reference to an IRImage object
+    %   that serves as a container for an image matrix.
     
-    properties (Access = public, SetObservable)
-        values = [];
-        mirror = [0,0,0,0];
-        pads   = [0,0,0,0]; % Top, Bot, Left, Right (in image coordinates... +y points down)
+    properties
+        values  = [];
+        pads    = [0,0,0,0]; % Top, Bot, Left, Right (in image coordinates... +y points down)
+        mirror  = [0,0,0,0];
+        padding = NaN; % allow for padding with zeros, nans, whatever
     end
     
     properties (Access = private)
-        azL        = [];
-        elL        = [];
-        savedData  = [];
-        lastpads   = [0,0,0,0]; % the previous "pads" setting
-        lastmirror = [0,0,0,0];
+        filepath  = '';
+        time      = [];
+        az        = [];
+        el        = [];
     end
 
     %% CONSTRUCTOR
@@ -39,10 +22,6 @@ classdef IRImage < handle
     methods
         function obj = IRImage(inputImage)
             obj = erase(obj);
-            
-            % add listeners
-            addlistener(obj, 'pads', 'PostSet', @(src, evnt) obj.padsChanged);   
-            addlistener(obj, 'mirror', 'PostSet', @(src, evnt) obj.mirrorChanged);   
             
             if nargin < 1, return; end
             
@@ -74,11 +53,13 @@ classdef IRImage < handle
 
                                     % assign to the object
                                     obj.values = img;
-                                    obj.savedData = obj.values;
                                 catch err
                                     rethrow(err);
                                 end
                         end
+                        
+                        % save the filepath in case we want to reload
+                        filepath = inputImage;
                         
                     case 'cell'
                         % when given a cellstr of filepaths, recursively load them into an array of
@@ -109,10 +90,53 @@ classdef IRImage < handle
                         
                         % all good.  assign to object
                         obj.values = inputImage;
-                        obj.savedData = inputImage;
                                 
                 end 
             end 
+        end
+    end
+    
+    %% SETTORS & ACCESSORS
+    methods
+        function set.pads(obj, value)
+            % function to automatically apply pads to the image when the user
+            % changes the 'pads' property value
+            pad      = fixPads(value);
+            obj      = applyPads(obj, pad);
+            obj.pads = pad;
+        end
+        
+        function set.padding(obj, value)
+            %PADDING This is a help menu
+            % this is more help
+            
+            if ~isempty(value) && ~isa(value,'cell') && ~isa(value,'struct') && ~isa(value,'sym') && isscalar(value)
+                obj.padding = value;
+                % now refresh the pads
+                applyPads(obj);
+            else
+                error('Image padding must be defined as a scalar value.');
+            end
+        end
+        
+        function set.mirror(obj, value)
+        end
+        
+        function c = rmin(obj)
+            % first valid row
+            c = 1+abs(obj.pads(1))+abs(obj.mirror(1));
+        end
+        function c = rmax(obj)
+            % last valid row
+            c = size(obj.values,1)-abs(obj.pads(2))-abs(obj.mirror(2)); 
+        end
+        function c = cmin(obj)
+            % first valid column
+            c = 1+abs(obj.pads(3))+abs(obj.mirror(3));    
+        end
+        function c = cmax(obj)  
+            % last valid column
+            c = size(obj.values,2)-abs(obj.pads(4))-abs(obj.mirror(4)); 
         end
     end
     
@@ -122,12 +146,8 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         % RESET BACK TO ORIGINAL STATE
         % ---------------------------------------------------------------------------------------- %
-        function obj = reset(obj)
-            obj.lastpads   = [0 0 0 0];
-            obj.pads       = [0 0 0 0];
-            obj.lastmirror = [0 0 0 0];
-            obj.mirror     = [0 0 0 0];
-            obj.values     = obj.savedData;
+        function obj = reload(obj)
+            obj = IRImage(obj.filepath);
         end
         
         % ---------------------------------------------------------------------------------------- %
@@ -393,8 +413,7 @@ classdef IRImage < handle
             end
         end
     end
-    
-    
+     
     %% KERNELS (STATIC METHODS)
     methods (Static, Access = public)
         % ---------------------------------------------------------------------------------------- %
@@ -502,146 +521,78 @@ classdef IRImage < handle
         function obj = erase(obj)
             % public
             obj.values   = [];
-            obj.lastpads = [0,0,0,0];
             obj.pads     = [0,0,0,0];
             
             % private
-            obj.savedData = [];
-            obj.azL       = [];
-            obj.elL       = [];
+            obj.az        = [];
+            obj.el        = [];
         end
         
         % ---------------------------------------------------------------------------------------- %
-        % LISTENER CALLBACK ON 'PADS' PROPERTY
+        % APPLY PADS TO THE IMAGE
         % ---------------------------------------------------------------------------------------- %
-        function obj = padsChanged(obj, ~, ~)
-            
-            % allow the user to input a single value for all the pads, (e.g. pads = 3 --> [3 3 3 3])
-            if ~isempty(obj.pads) && isscalar(obj.pads)
-                obj.pads = repmat(obj.pads, 1, 4);
+        function obj = applyPads(obj, newPads)
+            if nargin < 2
+                % refresh with no args
+                newPads = obj.pads;
             end
             
-            % force all integers
-            obj.pads = floor(obj.pads);
-            
-            % have the pads changed value?
-            if ~isequal(obj.pads, obj.lastpads)
-                % calculate the differences to skip sides with no change
-                padUpdate = obj.pads - obj.lastpads;
-               
-                for side = 1:4
-                    if padUpdate(side) == 0
-                        continue
-                    end
-                                        
-                    % apply the inner pads.  we'll keep the size the same while replacing parts of
-                    % the image with zeros
-                    if obj.pads(side) <= 0
-                        if (obj.lastpads(side) < 0) && (padUpdate(side) > 0)
-                            % x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x 
-                            % ABANDONED FOR NOW -- not sure if this is a good idea...
-                            %
-                            % e.g. the last pad was -5 and we now want a pad of -2.  the region
-                            % between -5:-3 has already been removed, so we'll need to use the
-                            % saved image state to try and recover that lost information...
-                            % x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x 
-                            switch side
-                                case 1 % TOP (in image coordinates, datum at top-left corner)
-                                case 2 % BOT
-                                case 3 % LEFT
-                                case 4 % RIGHT
-                            end
-                        elseif obj.pads(side) ~= 0
-                            % we are only increasing the padded region, so we don't need to lookup
-                            % the saved image state to recover information that was previously
-                            % removed by pads.
-                            switch side
-                                case 1 % TOP (in image coordinates, datum at top-left corner)
-                                    obj.values((abs(obj.lastpads(side))+1):(abs(obj.lastpads(side))-padUpdate(side)), :) = NaN;
-                                case 2 % BOT
-                                    obj.values((size(obj.values,1)-abs(obj.lastpads(side))+padUpdate(side)+1):end, :) = NaN;
-                                case 3 % LEFT
-                                    obj.values(:, (abs(obj.lastpads(side))+1):(abs(obj.lastpads(side))-padUpdate(side))) = NaN;
-                                case 4 % RIGHT
-                                    obj.values(:, (size(obj.values,2)-abs(obj.lastpads(side))+padUpdate(side)+1):end) = NaN;
-                            end
-                        end
-                    end
-                end
-                
-                % create a temporary image where we will place the original image on top 
-                % (( current size + (positive padding requested) - (previous padding) ))
-                tempImageRows = size(obj.values,1)+max(0,obj.pads(1))+max(0,obj.pads(2))-max(0,obj.lastpads(1))-max(0,obj.lastpads(2));
-                tempImageColumns = size(obj.values,2)+max(0,obj.pads(3))+max(0,obj.pads(4))-max(0,obj.lastpads(3))-max(0,obj.lastpads(4));
-                tempImage = NaN(tempImageRows, tempImageColumns);
-                
-                % for the purposes of placing the original image, negative pads are irrelevant
-                tpads = obj.pads;
-                tpads(tpads < 0) = 0;
-                
-                % calculate the new indexes into the temp image where the image will live
-                tempStartRow = 1+tpads(1);
-                tempEndRow   = size(tempImage,1)-tpads(2);
-                tempStartCol = 1+tpads(3);
-                tempEndCol   = size(tempImage,2)-tpads(4);
-                
-                % now need to figure out where the valid portion of the image is in obj.values
-                tpadslast = obj.lastpads;
-                tpadslast(tpadslast < 0) = 0;
-                
-                % get the indexes to the actual image (minus padding) stored in the object
-                objStartRow = 1+tpadslast(1);
-                objEndRow   = size(obj.values,1)-tpadslast(2);
-                objStartCol = 1+tpadslast(3);
-                objEndCol   = size(obj.values,2)-tpadslast(4);
-                
-                % place the original image inside the temp image to add the pads
-                tempImage(tempStartRow:tempEndRow, tempStartCol:tempEndCol) = obj.values(objStartRow:objEndRow, objStartCol:objEndCol);
-                
-                % return the updated image & pads
-                obj.values = tempImage;
-                obj.lastpads = obj.pads;
-            end
-        end
-        
-        % ---------------------------------------------------------------------------------------- %
-        % LISTENER CALLBACK ON 'MIRROR' PROPERTY
-        % ---------------------------------------------------------------------------------------- %
-        function obj = mirrorChanged(obj, ~, ~)
-            
-            if ~isempty(obj.mirror) && isscalar(obj.mirror)
-                obj.mirror = repmat(obj.mirror, 1, 4);
-            end
-            
-            if any(obj.mirror < 0)
-                obj.mirror = obj.lastmirror;
-                error('Mirror values must be positive integers!');
-            end
-            
-            % force all integers
-            obj.mirror = floor(obj.mirror);
-            
-            % have the pads changed value?
-            if ~isequal(obj.mirror, obj.lastmirror)
-                % calculate the differences to skip sides with no change
-                mirrorUpdate = obj.mirror - obj.lastmirror;
-                tempImage = zeros(size(obj.values,1)+sum(mirrorUpdate(1:2)), size(obj.values,2)+sum(mirrorUpdate(3:4)));
-               
-                for side = 1:4
-                    if mirrorUpdate(side) == 0
-                        continue
-                    end
-                                        
+            % calculate the differences to skip sides with no change
+            padUpdate = newPads - obj.pads;
+
+            % apply the inner (negative) pads first.  these overwrite part of image
+            for side = 1:4             
+                if newPads(side) < 0
                     switch side
                         case 1 % TOP (in image coordinates, datum at top-left corner)
+                            obj.values((abs(obj.pads(side))+1):(abs(obj.pads(side))-padUpdate(side)), :) = obj.padding;
                         case 2 % BOT
+                            obj.values((size(obj.values,1)-abs(obj.pads(side))+padUpdate(side)+1):end, :) = obj.padding;
                         case 3 % LEFT
+                            obj.values(:, (abs(obj.pads(side))+1):(abs(obj.pads(side))-padUpdate(side))) = obj.padding;
                         case 4 % RIGHT
+                            obj.values(:, (size(obj.values,2)-abs(obj.pads(side))+padUpdate(side)+1):end) = obj.padding;
                     end
                 end
-                
-                obj.lastmirror = obj.mirror;
             end
+
+            % create a temporary image where we will place the original image on top 
+            % (( current size + (positive padding requested) - (previous padding) ))
+            tempImageRows = size(obj.values,1)+max(0,newPads(1))+max(0,newPads(2))-max(0,obj.pads(1))-max(0,obj.pads(2));
+            tempImageColumns = size(obj.values,2)+max(0,newPads(3))+max(0,newPads(4))-max(0,obj.pads(3))-max(0,obj.pads(4));
+            tempImage = repmat(obj.padding, [tempImageRows, tempImageColumns]);
+
+            % for the purposes of placing the original image, negative pads are irrelevant
+            tpads = newPads;
+            tpads(tpads < 0) = 0;
+
+            % calculate the new indexes into the temp image where the image will live
+            tempStartRow = 1+tpads(1);
+            tempEndRow   = size(tempImage,1)-tpads(2);
+            tempStartCol = 1+tpads(3);
+            tempEndCol   = size(tempImage,2)-tpads(4);
+
+            % now need to figure out where the valid portion of the image is in obj.values
+            tpadslast = obj.pads;
+            tpadslast(tpadslast < 0) = 0;
+
+            % get the indexes to the actual image (minus padding) stored in the object
+            objStartRow = 1+tpadslast(1);
+            objEndRow   = size(obj.values,1)-tpadslast(2);
+            objStartCol = 1+tpadslast(3);
+            objEndCol   = size(obj.values,2)-tpadslast(4);
+
+            % place the original image inside the temp image to add the pads
+            tempImage(tempStartRow:tempEndRow, tempStartCol:tempEndCol) = obj.values(objStartRow:objEndRow, objStartCol:objEndCol);
+
+            % return the updated image & pads
+            obj.values = tempImage;
+        end
+        
+        % ---------------------------------------------------------------------------------------- %
+        % APPLY MIRRORING TO THE IMAGE
+        % ---------------------------------------------------------------------------------------- %
+        function obj = applyMirror(obj, newMirror)
         end
         
         % ---------------------------------------------------------------------------------------- %
@@ -649,38 +600,18 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         
         function autoUpdateAxes(obj, hImage, prop)
-            % done as 3 separate listeners to preserve backwards compatibility with older MATLAB
-            % versions.  maybe there's a better way to do this.
-            hl_1 = addlistener(obj, 'values', 'PostSet', @(o,e) set(hImage, prop, e.AffectedObject.values));
-            hl_2 = addlistener(obj, 'values', 'PostSet', @(o,e) axis(get(hImage,'parent'),'tight'));
-            hl_3 = addlistener(obj, 'values', 'PostSet', @(o,e) drawnow);
-            
-            % now apply listeners to the image that will remove the image object listeners...
-            addlistener(hImage,'ObjectBeingDestroyed', @(o,e) delete(hl_1));
-            addlistener(hImage,'ObjectBeingDestroyed', @(o,e) delete(hl_2));
-            addlistener(hImage,'ObjectBeingDestroyed', @(o,e) delete(hl_3));
+%             % done as 3 separate listeners to preserve backwards compatibility with older MATLAB
+%             % versions.  maybe there's a better way to do this.
+%             hl_1 = addlistener(obj, 'values', 'PostSet', @(o,e) set(hImage, prop, e.AffectedObject.values));
+%             hl_2 = addlistener(obj, 'values', 'PostSet', @(o,e) axis(get(hImage,'parent'),'tight'));
+%             hl_3 = addlistener(obj, 'values', 'PostSet', @(o,e) drawnow);
+%             
+%             % now apply listeners to the image that will remove the image object listeners...
+%             addlistener(hImage,'ObjectBeingDestroyed', @(o,e) delete(hl_1));
+%             addlistener(hImage,'ObjectBeingDestroyed', @(o,e) delete(hl_2));
+%             addlistener(hImage,'ObjectBeingDestroyed', @(o,e) delete(hl_3));
         end
         
-    end
-    
-    %% ACCESSORS
-    methods (Access = public)
-        function v = rmin(obj)
-            % first valid row
-            v = 1+abs(obj.pads(1))+abs(obj.mirror(1));
-        end
-        function v = rmax(obj)
-            % last valid row
-            v = size(obj.values,1)-abs(obj.pads(2))-abs(obj.mirror(2)); 
-        end
-        function v = cmin(obj)
-            % first valid column
-            v = 1+abs(obj.pads(3))+abs(obj.mirror(3));    
-        end
-        function v = cmax(obj)  
-            % last valid column
-            v = size(obj.values,2)-abs(obj.pads(4))-abs(obj.mirror(4)); 
-        end
     end
     
     %% OVERLOADED METHODS
@@ -689,7 +620,7 @@ classdef IRImage < handle
         function h = imagesc(obj, varargin) 
             % link the image object to the axis & auto-update when values change
             himg = imagesc(obj.values, varargin{:});
-            autoUpdateAxes(obj, himg, 'cdata');
+%             autoUpdateAxes(obj, himg, 'cdata');
             if nargout > 0, h = himg; end
         end
         function h = surf(obj, varargin)
@@ -697,7 +628,7 @@ classdef IRImage < handle
             hsurf = surf(obj.values, varargin{:});
             shading(get(hsurf,'parent'),'interp');  
             axis(get(hsurf,'parent'),'tight');
-            autoUpdateAxes(obj, hsurf, 'zdata');
+%             autoUpdateAxes(obj, hsurf, 'zdata');
             if nargout > 0, h = hsurf; end
         end
         function image(obj, varargin),     image(obj.values, varargin{:});      end
@@ -800,7 +731,15 @@ classdef IRImage < handle
                 % object still exists
                 fprintf('\t<a href="matlab:helpPopup IRImage">IRImage</a> with properties:\n\n');
                 fprintf('\t%10s: [%dx%d %s]\n', 'values', size(obj.values,1), size(obj.values,2), class(obj.values));
-                fprintf('\t%10s: [%d %d %d %d]\n', 'pads', obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4));
+                if ~isnan(obj.padding) && (mod(obj.padding,1) == 0) % integer type
+                    fprintf('\t%10s: [%d %d %d %d] :: %s\n', 'pads', ...
+                        obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4),... 
+                        sprintf('<a href="matlab:helpPopup IRImage.set.padding">%d</a>',obj.padding));
+                else % floating point type
+                    fprintf('\t%10s: [%d %d %d %d] :: %s\n', 'pads', ...
+                        obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4),... 
+                        sprintf('<a href="matlab:helpPopup IRImage.set.padding">%.2f</a>',obj.padding));
+                end
                 fprintf('\t%10s: [%d %d %d %d]\n', 'mirror', obj.mirror(1), obj.mirror(2), obj.mirror(3), obj.mirror(4));
                 if ismember(class(obj.values), {'uint8','uint16','uint32','uint64','int8','int16','int32','int64','logical'})
                     fprintf('\t%10s: %d\n', 'max', max(obj.values(:)));
@@ -810,7 +749,7 @@ classdef IRImage < handle
                     fprintf('\t%10s: %3.5f\n', 'min', min(obj.values(:)));
                 end
                 fprintf('\n');
-                fprintf('\tList <a href="matlab: methods(IRImage)">custom methods</a> for IRImage or show the <a href="matlab: methods IRImage">full list</a>.\n\n');
+                fprintf('\tList <a href="matlab: methods(IRImage)">methods</a> for IRImage.\n\n');
             else
                 % object has been deleted
                 fprintf('\thandle to deleted <a href="matlab:helpPopup IRImage">IRImage</a>\n');
@@ -820,32 +759,67 @@ classdef IRImage < handle
         
         function methods(obj) %#ok<*MANU>
             fprintf('\n');
-            fprintf('General-purpose methods for class IRImage:');
-            fprintf('\n\n');
+            fprintf('  General-purpose methods for class IRImage:');
+            fprintf('\n');
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.filt">filt</a>', 'convolve the image with a kernel');
             fprintf('\t%52s: %s\n', '<a href="matlab:helpPopup IRImage.sfilt">sfilt</a>', 'convolve, then subtract from original image');
-            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.snip">snip</a>', 'cut out a section of the image');
-            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'threshold to one or more values');
+            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.snip">snip</a>', 'extract a section of the image');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.fft">fft</a>', 'plot the 2D fourier transform');
             fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.copy">copy</a>', 'clone the object');
             
+            % FILTERS
+            fprintf('\n');
+            fprintf('  Filters:');
+            fprintf('\n');
+            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'threshold to one or more values');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.med">med</a>', 'median filter');
+            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.rmr">rmr</a>', 'row mean removal');
+            
             % KERNELS
             fprintf('\n');
-            fprintf('Kernel generation (static methods):');
-            fprintf('\n\n');
+            fprintf('  Kernels (static methods):');
+            fprintf('\n');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.box">box</a>', 'box blur kernel (mean filter)');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.gauss2d">gauss2d</a>', 'gaussian kernel');
             fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.tri">tri</a>', 'triangle filter kernel');
             
-            % FILTERS
-            fprintf('\n');
-            fprintf('Methods to directly apply a filter:');
-            fprintf('\n\n');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.rmr">rmr</a>', 'row mean removal');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.med">med</a>', 'median filter');
             fprintf('\n');
         end
     end
     
+end
+
+% ------------------------------------------------------------------------------------------------ %
+%                                     END OF CLASS DEFINITION
+% ------------------------------------------------------------------------------------------------ %
+
+%% LOCAL FUNCTIONS
+
+function pad = fixPads(pad)
+% FIXPADS Function to force pads/mirrors into a standard format.
+%   PAD = FIXPADS(PAD) performs basic error checking on PAD format
+%   and tries to auto-correct invalid input where reasonable.  Basic
+%   rules are pads must be real integers.
+
+    % interpret empty arrays as "let's clear this pad out"
+    if isempty(pad)
+        pad = [0,0,0,0];
+    else
+        if any(isnan(pad))
+            error('Padding values cannot be NaNs!');
+        elseif any(~isreal(pad)) || any(~isnumeric(pad))
+            error('Padding values must be real integers!');
+        elseif ~ismember(length(pad), [1 4])
+            error('Padding values can either be 1) empty array, 2) 1x1 scalar, or 3) 1x4 vector.');
+        end
+    end
+    
+    % force integers
+    pad = floor(pad);
+    
+    % fix scalar input (1x1 -> 1x4)
+    if isscalar(pad)
+        pad = repmat(pad, 1, 4);
+    end
 end
 
