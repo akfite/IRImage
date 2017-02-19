@@ -101,7 +101,7 @@ classdef IRImage < handle
         function set.pads(obj, value)
             % function to automatically apply pads to the image when the user
             % changes the 'pads' property value
-            pad      = fixPads(value);
+            pad      = localFixPads(value);
             obj      = applyPads(obj, pad);
             obj.pads = pad;
         end
@@ -120,6 +120,57 @@ classdef IRImage < handle
         end
         
         function set.mirror(obj, value)
+        end
+        
+        function setaz(obj,xpix,az)
+            % SETAZ Apply azimuth line-of-sight (LOS) data to the image.
+            %   SETAZ(OBJ, XPIX, AZ) provides LOS context to the image and
+            %   enables functions PIX2LOS and LOS2PIX.  The pixel locations
+            %   provided with XPIX should include any padding that is applied
+            %   to the image object.  Any mirroring is ignored.
+            %
+            %   Inputs:
+            %       XPIX is a vector of x-pixel locations.
+            %       AZ is a vector of azimuth values at XPIX.
+            %
+            %   A.Fite, 2017
+            
+            localCheckLOS(xpix, az, obj.cmin, obj.cmax)
+            obj.az = interp1(xpix, az, 1:size(obj.values,2), 'linear','extrap');
+        end
+        
+        function setel(obj,ypix,el)
+            % SETEL Apply elevation line-of-sight (LOS) data to the image.
+            %   SETEL(OBJ, YPIX, EL) provides LOS context to the image and
+            %   enables functions PIX2LOS and LOS2PIX.  The pixel locations
+            %   provided with YPIX should include any padding that is applied
+            %   to the image object.  Any mirroring is ignored.
+            %
+            %   Inputs:
+            %       YPIX is a vector of x-pixel locations.
+            %       EL is a vector of azimuth values at XPIX.
+            %
+            %   A.Fite, 2017
+            
+            localCheckLOS(ypix, el, obj.rmin, obj.rmax)
+            obj.el = interp1(ypix, el, 1:size(obj.values,1), 'linear','extrap');
+        end
+        
+        function obj = settime(obj,xpix,time)
+            % SETTIME Apply timestamp data to each column of the image.
+            %   SETTIME(OBJ, XPIX, TIME) provides time context to the image and
+            %   enables functions PIX2TIME and TIME2PIX.  The pixel locations
+            %   provided with XPIX should include any padding that is applied
+            %   to the image object.  Any mirroring is ignored.
+            %
+            %   Inputs:
+            %       XPIX is a vector of x-pixel locations.
+            %       TIME is a vector of time values at XPIX.
+            %
+            %   A.Fite, 2017
+            
+            localCheckLOS(xpix, time);
+            obj.time = interp1(xpix, time, 1:size(obj.values,2), 'linear','extrap');
         end
         
         function c = rmin(obj)
@@ -277,13 +328,47 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         
         % convert vectors of x & y pixel coordinates into azimuth and elevation vectors
-        function [az, el] = pix2los(obj, x, y) %#ok<INUSD,STOUT>
-            error('This function is a placeholder for now.');
+        function [az, el] = pix2los(obj, x, y)
+            az = []; el = [];
+            
+            if ~isempty(obj.az) && ~isempty(x)
+                az = interp1(obj.cmin:obj.cmax, obj.az, x, 'linear','extrap');
+            end
+            
+            if ~isempty(obj.el) && ~isempty(y)
+                el = interp1(obj.rmin:obj.rmax, obj.el, y, 'linear','extrap');
+            end
         end
         
-        % convert vectors of los coordinates (az, el) into 
-        function [x, y] = los2pix(obj, az, el) %#ok<INUSD,STOUT>
-            error('This function is a placeholder for now.');
+        % convert vectors of los coordinates (az, el) into pixel coordinates
+        function [x, y] = los2pix(obj, az, el) 
+            x = []; y = [];
+            
+            if ~isempty(obj.az) && ~isempty(x)
+                x = interp1(obj.az(obj.cmin:obj.cmax), obj.cmin:obj.cmax, az, 'linear','extrap');
+            end
+            
+            if ~isempty(obj.el) && ~isempty(y)
+                y = interp1(obj.el(obj.rmin:obj.rmax), obj.rmin:obj.rmax, el, 'linear','extrap');
+            end
+        end
+        
+        % get the column timestamp for a scanned image
+        function time = pix2time(obj, x)
+            if ~isempty(obj.time)
+                time = interp1(obj.cmin:obj.cmax, obj.time(obj.cmin:obj.cmax), x, 'linear','extrap');
+            else
+                error('Unable to retrieve time data.  Try applying time to the image with settime().');
+            end
+        end
+        
+        % get the column number for a scanned image
+        function x = time2pix(obj, time)
+            if ~isempty(obj.time)
+                x = interp1(obj.time(obj.cmin:obj.cmax), obj.cmin:obj.cmax, time, 'linear','extrap');
+            else
+                error('Timestamp data does not exist.  Try applying a timestamp to the image with settime().');
+            end
         end
         
     end
@@ -784,7 +869,7 @@ end
 
 %% LOCAL FUNCTIONS
 
-function pad = fixPads(pad)
+function pad = localFixPads(pad)
 % FIXPADS Function to force pads/mirrors into a standard format.
 %   PAD = FIXPADS(PAD) performs basic error checking on PAD format
 %   and tries to auto-correct invalid input where reasonable.  Basic
@@ -812,3 +897,26 @@ function pad = fixPads(pad)
     end
 end
 
+function localCheckLOS(setpix, value, minval, maxval)
+    % if min/max values on 'value' are specified
+    if nargin > 2 && any(setpix < minval | setpix > maxval)
+        error('Attempted to set pixel values outside image bounds.');
+    end
+
+    % continue to only check the first 2 args
+    if isempty(setpix) || isempty(value)
+        error('Pixel and LOS vectors must both be non-empty vectors of the same length.');
+    elseif any(isnan(setpix)) || any(isnan(value))
+        error('NaN is not a valid LOS or pixel value.');
+    elseif ~isvector(setpix) || ~isvector(value) || length(setpix) ~= length(value)
+        error('Pixel and LOS vectors must both have the same length.')
+    end
+        
+    % values must be monotonically increasing or decreasing
+    pixdir = sign(diff(setpix));
+    valuedir = sign(diff(value));
+
+    if ~(all(pixdir == 1) || all(pixdir == -1)) && ~(all(valuedir == 1) || all(valuedir == -1))
+        error('Pixel and LOS vectors must both be monotonically increasing or decreasing.')
+    end
+end
