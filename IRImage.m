@@ -127,7 +127,7 @@ classdef IRImage < handle
             %   SETAZ(OBJ, XPIX, AZ) provides LOS context to the image and
             %   enables functions PIX2LOS and LOS2PIX.  The pixel locations
             %   provided with XPIX should include any padding that is applied
-            %   to the image object.  Any mirroring is ignored.
+            %   to the image object.
             %
             %   Inputs:
             %       XPIX is a vector of x-pixel locations.
@@ -136,7 +136,7 @@ classdef IRImage < handle
             %   A.Fite, 2017
             
             localCheckLOS(xpix, az, obj.cmin, obj.cmax)
-            obj.az = interp1(xpix, az, 1:size(obj.values,2), 'linear','extrap');
+            obj.az = interp1(xpix, az, obj.cmin:obj.cmax, 'linear','extrap');
         end
         
         function setel(obj,ypix,el)
@@ -144,7 +144,7 @@ classdef IRImage < handle
             %   SETEL(OBJ, YPIX, EL) provides LOS context to the image and
             %   enables functions PIX2LOS and LOS2PIX.  The pixel locations
             %   provided with YPIX should include any padding that is applied
-            %   to the image object.  Any mirroring is ignored.
+            %   to the image object.
             %
             %   Inputs:
             %       YPIX is a vector of x-pixel locations.
@@ -153,7 +153,7 @@ classdef IRImage < handle
             %   A.Fite, 2017
             
             localCheckLOS(ypix, el, obj.rmin, obj.rmax)
-            obj.el = interp1(ypix, el, 1:size(obj.values,1), 'linear','extrap');
+            obj.el = interp1(ypix, el, obj.rmin:obj.rmax, 'linear','extrap');
         end
         
         function obj = settime(obj,xpix,time)
@@ -161,7 +161,7 @@ classdef IRImage < handle
             %   SETTIME(OBJ, XPIX, TIME) provides time context to the image and
             %   enables functions PIX2TIME and TIME2PIX.  The pixel locations
             %   provided with XPIX should include any padding that is applied
-            %   to the image object.  Any mirroring is ignored.
+            %   to the image object.
             %
             %   Inputs:
             %       XPIX is a vector of x-pixel locations.
@@ -170,7 +170,7 @@ classdef IRImage < handle
             %   A.Fite, 2017
             
             localCheckLOS(xpix, time);
-            obj.time = interp1(xpix, time, 1:size(obj.values,2), 'linear','extrap');
+            obj.time = interp1(xpix, time, obj.cmin:obj.cmax, 'linear','extrap');
         end
         
         function c = rmin(obj)
@@ -193,7 +193,6 @@ classdef IRImage < handle
     
     %% GENERAL (PUBLIC)
     methods (Access = public)
-        
         % ---------------------------------------------------------------------------------------- %
         % RESET BACK TO ORIGINAL STATE
         % ---------------------------------------------------------------------------------------- %
