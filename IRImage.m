@@ -132,8 +132,6 @@ classdef IRImage < handle
             %   Inputs:
             %       XPIX is a vector of x-pixel locations.
             %       AZ is a vector of azimuth values at XPIX.
-            %
-            %   A.Fite, 2017
             
             localCheckLOS(xpix, az, obj.cmin, obj.cmax)
             obj.az = interp1(xpix, az, obj.cmin:obj.cmax, 'linear','extrap');
@@ -148,9 +146,7 @@ classdef IRImage < handle
             %
             %   Inputs:
             %       YPIX is a vector of x-pixel locations.
-            %       EL is a vector of azimuth values at XPIX.
-            %
-            %   A.Fite, 2017
+            %       EL is a vector of azimuth values at XPIX
             
             localCheckLOS(ypix, el, obj.rmin, obj.rmax)
             obj.el = interp1(ypix, el, obj.rmin:obj.rmax, 'linear','extrap');
@@ -166,8 +162,6 @@ classdef IRImage < handle
             %   Inputs:
             %       XPIX is a vector of x-pixel locations.
             %       TIME is a vector of time values at XPIX.
-            %
-            %   A.Fite, 2017
             
             localCheckLOS(xpix, time);
             obj.time = interp1(xpix, time, obj.cmin:obj.cmax, 'linear','extrap');
@@ -224,8 +218,6 @@ classdef IRImage < handle
             %   SIZE can be a 2-element array or a scalar. Scalar input returns a square
             %   box cutout with dimensions of width equal to the scalar.  Inputs are 
             %   required to be odd integer values.
-            %
-            %   A.Fite, 2017
             
             if nargin < 4 || isempty(snipsize)
                 % snip to 10% of the image size
@@ -283,8 +275,6 @@ classdef IRImage < handle
             % FILT Apply a filter to the image.
             %   FILT(OBJ, K) performs the 2D convolution between
             %   the image held by OBJ and the kernel K.
-            %
-            %   A.Fite, 2017
             
             % apply the filter
             obj.values = conv2(double(obj.values), filter, 'same');
@@ -298,8 +288,6 @@ classdef IRImage < handle
             %   SFILT(OBJ, K) performs the 2D convolution between
             %   the image held by OBJ and the kernel K, then
             %   subtracts the result from the original image.
-            %
-            %   A.Fite, 2017
 
             % apply the filter, then subtract from the original image
             obj.values = double(obj.values) - conv2(double(obj.values), filter, 'same');
@@ -396,8 +384,6 @@ classdef IRImage < handle
             %       img = IRImage(img.X);
             %       img.med([3 5]);  % apply a 3x5 median filter
             %       img.med(3);      % apply a 3x3 median filter
-            %
-            %   A.Fite, 2017
             
             if ~isempty(varargin)
                 nhood = varargin{1};
@@ -478,8 +464,6 @@ classdef IRImage < handle
             %       15 <= x       --> 3
             %
             %           img.thresh([5, 10, 15])
-            %
-            %   A.Fite, 2017
             outImage = obj.values;
             
             % require that all values be in ascending order
@@ -509,8 +493,6 @@ classdef IRImage < handle
             % BOX Create a simple box/mean filter kernel.
             %   K = BOX(N) creates an NxN mean filter.
             %   K = BOX([M N]) creates an MxN mean filter.
-            %
-            %   A.Fite, 2017
             if nargin == 2 && isscalar(N)
                 K = [M N];
             elseif isscalar(M)
@@ -539,8 +521,6 @@ classdef IRImage < handle
             %
             %   Or, as a static method:
             %       kernel = IRImage.gauss2d(13);
-            %
-            %   A.Fite, 2017
             
             if isempty(N) || ~isscalar(N) || isnan(N) || N <= 1 || mod(N,2) ~= 1
                 error('The kernel width must be an odd integer greater than 1.');
@@ -583,8 +563,6 @@ classdef IRImage < handle
             %   K = TRI(N) creates a 1xN triangle filter by convolving
             %   two box filters.  The output is normalized to have a
             %   unit volume.
-            %
-            %   A.Fite, 2017
             
             if ~isscalar(N) || N <= 1 || mod(N,2) ~= 1
                 error('Invalid input.  N must be an odd integer greater than 1.');
