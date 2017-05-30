@@ -5,8 +5,6 @@ classdef IRImage < handle
     
     properties
         values  = [];
-        pads    = [0,0,0,0]; % Top, Bot, Left, Right (in image coordinates... +y points down)
-        mirror  = [0,0,0,0];
         padding = NaN; % allow for padding with zeros, nans, whatever
     end
     
@@ -96,95 +94,6 @@ classdef IRImage < handle
         end
     end
     
-    %% SETTORS & ACCESSORS
-    methods
-        function set.pads(obj, value)
-            % function to automatically apply pads to the image when the user
-            % changes the 'pads' property value
-            pad      = localFixPads(value);
-            obj      = applyPads(obj, pad);
-            obj.pads = pad;
-        end
-        
-        function set.padding(obj, value)
-            %PADDING This is a help menu
-            % this is more help
-            
-            if ~isempty(value) && ~isa(value,'cell') && ~isa(value,'struct') && ~isa(value,'sym') && isscalar(value)
-                obj.padding = value;
-                % now refresh the pads
-                applyPads(obj);
-            else
-                error('Image padding must be defined as a scalar value.');
-            end
-        end
-        
-        function set.mirror(obj, value)
-        end
-        
-        function setaz(obj,xpix,az)
-            % SETAZ Apply azimuth line-of-sight (LOS) data to the image.
-            %   SETAZ(OBJ, XPIX, AZ) provides LOS context to the image and
-            %   enables functions PIX2LOS and LOS2PIX.  The pixel locations
-            %   provided with XPIX should include any padding that is applied
-            %   to the image object.
-            %
-            %   Inputs:
-            %       XPIX is a vector of x-pixel locations.
-            %       AZ is a vector of azimuth values at XPIX.
-            
-            localCheckLOS(xpix, az, obj.cmin, obj.cmax)
-            obj.az = interp1(xpix, az, obj.cmin:obj.cmax, 'linear','extrap');
-        end
-        
-        function setel(obj,ypix,el)
-            % SETEL Apply elevation line-of-sight (LOS) data to the image.
-            %   SETEL(OBJ, YPIX, EL) provides LOS context to the image and
-            %   enables functions PIX2LOS and LOS2PIX.  The pixel locations
-            %   provided with YPIX should include any padding that is applied
-            %   to the image object.
-            %
-            %   Inputs:
-            %       YPIX is a vector of x-pixel locations.
-            %       EL is a vector of azimuth values at XPIX
-            
-            localCheckLOS(ypix, el, obj.rmin, obj.rmax)
-            obj.el = interp1(ypix, el, obj.rmin:obj.rmax, 'linear','extrap');
-        end
-        
-        function obj = settime(obj,xpix,time)
-            % SETTIME Apply timestamp data to each column of the image.
-            %   SETTIME(OBJ, XPIX, TIME) provides time context to the image and
-            %   enables functions PIX2TIME and TIME2PIX.  The pixel locations
-            %   provided with XPIX should include any padding that is applied
-            %   to the image object.
-            %
-            %   Inputs:
-            %       XPIX is a vector of x-pixel locations.
-            %       TIME is a vector of time values at XPIX.
-            
-            localCheckLOS(xpix, time);
-            obj.time = interp1(xpix, time, obj.cmin:obj.cmax, 'linear','extrap');
-        end
-        
-        function c = rmin(obj)
-            % first valid row
-            c = 1+abs(obj.pads(1))+abs(obj.mirror(1));
-        end
-        function c = rmax(obj)
-            % last valid row
-            c = size(obj.values,1)-abs(obj.pads(2))-abs(obj.mirror(2)); 
-        end
-        function c = cmin(obj)
-            % first valid column
-            c = 1+abs(obj.pads(3))+abs(obj.mirror(3));    
-        end
-        function c = cmax(obj)  
-            % last valid column
-            c = size(obj.values,2)-abs(obj.pads(4))-abs(obj.mirror(4)); 
-        end
-    end
-    
     %% GENERAL (PUBLIC)
     methods (Access = public)
         % ---------------------------------------------------------------------------------------- %
@@ -200,10 +109,6 @@ classdef IRImage < handle
         function newObj = clone(obj), newObj = copy(obj); end   % alternatively use "clone"
         function newObj = copy(obj)
             newObj = IRImage(obj.values);
-            newObj.lastpads = obj.pads;
-            newObj.lastmirror = obj.mirror;
-            newObj.pads = obj.pads;
-            newObj.mirror = obj.mirror;
         end
         
         % ---------------------------------------------------------------------------------------- %
@@ -309,55 +214,6 @@ classdef IRImage < handle
                 figure; imagesc(F); colormap gray
             end
         end
-        
-        % ---------------------------------------------------------------------------------------- %
-        % PIXEL-TO-LOS ANGLE CONVERSION
-        % ---------------------------------------------------------------------------------------- %
-        
-        % convert vectors of x & y pixel coordinates into azimuth and elevation vectors
-        function [az, el] = pix2los(obj, x, y)
-            az = []; el = [];
-            
-            if ~isempty(obj.az) && ~isempty(x)
-                az = interp1(obj.cmin:obj.cmax, obj.az, x, 'linear','extrap');
-            end
-            
-            if ~isempty(obj.el) && ~isempty(y)
-                el = interp1(obj.rmin:obj.rmax, obj.el, y, 'linear','extrap');
-            end
-        end
-        
-        % convert vectors of los coordinates (az, el) into pixel coordinates
-        function [x, y] = los2pix(obj, az, el) 
-            x = []; y = [];
-            
-            if ~isempty(obj.az) && ~isempty(x)
-                x = interp1(obj.az(obj.cmin:obj.cmax), obj.cmin:obj.cmax, az, 'linear','extrap');
-            end
-            
-            if ~isempty(obj.el) && ~isempty(y)
-                y = interp1(obj.el(obj.rmin:obj.rmax), obj.rmin:obj.rmax, el, 'linear','extrap');
-            end
-        end
-        
-        % get the column timestamp for a scanned image
-        function time = pix2time(obj, x)
-            if ~isempty(obj.time)
-                time = interp1(obj.cmin:obj.cmax, obj.time(obj.cmin:obj.cmax), x, 'linear','extrap');
-            else
-                error('Unable to retrieve time data.  Try applying time to the image with settime().');
-            end
-        end
-        
-        % get the column number for a scanned image
-        function x = time2pix(obj, time)
-            if ~isempty(obj.time)
-                x = interp1(obj.time(obj.cmin:obj.cmax), obj.cmin:obj.cmax, time, 'linear','extrap');
-            else
-                error('Timestamp data does not exist.  Try applying a timestamp to the image with settime().');
-            end
-        end
-        
     end
     
     %% FILTERS (PUBLIC)
@@ -582,74 +438,12 @@ classdef IRImage < handle
         % ---------------------------------------------------------------------------------------- %
         % APPLY PADS TO THE IMAGE
         % ---------------------------------------------------------------------------------------- %
-        function obj = applyPads(obj, newPads)
-            if nargin < 2
-                % refresh with no args
-                newPads = obj.pads;
-            end
-            
-            % calculate the differences to skip sides with no change
-            padUpdate = newPads - obj.pads;
-
-            % apply the inner (negative) pads first.  these overwrite part of image
-            for side = 1:4             
-                if newPads(side) < 0
-                    switch side
-                        case 1 % TOP (in image coordinates, datum at top-left corner)
-                            obj.values((abs(obj.pads(side))+1):(abs(obj.pads(side))-padUpdate(side)), :) = obj.padding;
-                        case 2 % BOT
-                            obj.values((size(obj.values,1)-abs(obj.pads(side))+padUpdate(side)+1):end, :) = obj.padding;
-                        case 3 % LEFT
-                            obj.values(:, (abs(obj.pads(side))+1):(abs(obj.pads(side))-padUpdate(side))) = obj.padding;
-                        case 4 % RIGHT
-                            obj.values(:, (size(obj.values,2)-abs(obj.pads(side))+padUpdate(side)+1):end) = obj.padding;
-                    end
-                end
-            end
-
-            % create a temporary image where we will place the original image on top 
-            % (( current size + (positive padding requested) - (previous padding) ))
-            tempImageRows = size(obj.values,1)+max(0,newPads(1))+max(0,newPads(2))-max(0,obj.pads(1))-max(0,obj.pads(2));
-            tempImageColumns = size(obj.values,2)+max(0,newPads(3))+max(0,newPads(4))-max(0,obj.pads(3))-max(0,obj.pads(4));
-            tempImage = repmat(obj.padding, [tempImageRows, tempImageColumns]);
-
-            % for the purposes of placing the original image, negative pads are irrelevant
-            tpads = newPads;
-            tpads(tpads < 0) = 0;
-
-            % calculate the new indexes into the temp image where the image will live
-            tempStartRow = 1+tpads(1);
-            tempEndRow   = size(tempImage,1)-tpads(2);
-            tempStartCol = 1+tpads(3);
-            tempEndCol   = size(tempImage,2)-tpads(4);
-
-            % now need to figure out where the valid portion of the image is in obj.values
-            tpadslast = obj.pads;
-            tpadslast(tpadslast < 0) = 0;
-
-            % get the indexes to the actual image (minus padding) stored in the object
-            objStartRow = 1+tpadslast(1);
-            objEndRow   = size(obj.values,1)-tpadslast(2);
-            objStartCol = 1+tpadslast(3);
-            objEndCol   = size(obj.values,2)-tpadslast(4);
-
-            % place the original image inside the temp image to add the pads
-            tempImage(tempStartRow:tempEndRow, tempStartCol:tempEndCol) = obj.values(objStartRow:objEndRow, objStartCol:objEndCol);
-
-            % return the updated image & pads
-            obj.values = tempImage;
-        end
-        
-        % ---------------------------------------------------------------------------------------- %
-        % APPLY MIRRORING TO THE IMAGE
-        % ---------------------------------------------------------------------------------------- %
-        function obj = applyMirror(obj, newMirror)
+        function obj = pad(obj, pads)
         end
         
         % ---------------------------------------------------------------------------------------- %
         % AUTOMATICALLY REFRESH AXES WHEN DATA CHANGES
         % ---------------------------------------------------------------------------------------- %
-        
         function autoUpdateAxes(obj, hImage, prop)
 %             % done as 3 separate listeners to preserve backwards compatibility with older MATLAB
 %             % versions.  maybe there's a better way to do this.
@@ -780,18 +574,8 @@ classdef IRImage < handle
         function disp(obj)
             if isvalid(obj)
                 % object still exists
-                fprintf('\t<a href="matlab:helpPopup IRImage">IRImage</a> with properties:\n\n');
+                fprintf('\t<a href="matlab:help IRImage">IRImage</a> with properties:\n\n');
                 fprintf('\t%10s: [%dx%d %s]\n', 'values', size(obj.values,1), size(obj.values,2), class(obj.values));
-                if ~isnan(obj.padding) && (mod(obj.padding,1) == 0) % integer type
-                    fprintf('\t%10s: [%d %d %d %d] :: %s\n', 'pads', ...
-                        obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4),... 
-                        sprintf('<a href="matlab:helpPopup IRImage.set.padding">%d</a>',obj.padding));
-                else % floating point type
-                    fprintf('\t%10s: [%d %d %d %d] :: %s\n', 'pads', ...
-                        obj.pads(1), obj.pads(2), obj.pads(3), obj.pads(4),... 
-                        sprintf('<a href="matlab:helpPopup IRImage.set.padding">%.2f</a>',obj.padding));
-                end
-                fprintf('\t%10s: [%d %d %d %d]\n', 'mirror', obj.mirror(1), obj.mirror(2), obj.mirror(3), obj.mirror(4));
                 if ismember(class(obj.values), {'uint8','uint16','uint32','uint64','int8','int16','int32','int64','logical'})
                     fprintf('\t%10s: %d\n', 'max', max(obj.values(:)));
                     fprintf('\t%10s: %d\n', 'min', min(obj.values(:)));
@@ -803,7 +587,7 @@ classdef IRImage < handle
                 fprintf('\tList <a href="matlab: methods(IRImage)">methods</a> for IRImage.\n\n');
             else
                 % object has been deleted
-                fprintf('\thandle to deleted <a href="matlab:helpPopup IRImage">IRImage</a>\n');
+                fprintf('\thandle to deleted <a href="matlab:help IRImage">IRImage</a>\n');
                 fprintf('\n');
             end
         end
@@ -812,27 +596,27 @@ classdef IRImage < handle
             fprintf('\n');
             fprintf('  General-purpose methods for class IRImage:');
             fprintf('\n');
-            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.filt">filt</a>', 'convolve the image with a kernel');
-            fprintf('\t%52s: %s\n', '<a href="matlab:helpPopup IRImage.sfilt">sfilt</a>', 'convolve, then subtract from original image');
-            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.snip">snip</a>', 'extract a section of the image');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.fft">fft</a>', 'plot the 2D fourier transform');
-            fprintf('\t%51s: %s\n', '<a href="matlab:helpPopup IRImage.copy">copy</a>', 'clone the object');
+            fprintf('\t%51s: %s\n', '<a href="matlab:help IRImage.filt">filt</a>', 'convolve the image with a kernel');
+            fprintf('\t%52s: %s\n', '<a href="matlab:help IRImage.sfilt">sfilt</a>', 'convolve, then subtract from original image');
+            fprintf('\t%51s: %s\n', '<a href="matlab:help IRImage.snip">snip</a>', 'extract a section of the image');
+            fprintf('\t%50s: %s\n', '<a href="matlab:help IRImage.fft">fft</a>', 'plot the 2D fourier transform');
+            fprintf('\t%51s: %s\n', '<a href="matlab:help IRImage.copy">copy</a>', 'clone the object');
             
             % FILTERS
             fprintf('\n');
             fprintf('  Filters:');
             fprintf('\n');
-            fprintf('\t%53s: %s\n', '<a href="matlab:helpPopup IRImage.thresh">thresh</a>', 'threshold to one or more values');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.med">med</a>', 'median filter');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.rmr">rmr</a>', 'row mean removal');
+            fprintf('\t%53s: %s\n', '<a href="matlab:help IRImage.thresh">thresh</a>', 'threshold to one or more values');
+            fprintf('\t%50s: %s\n', '<a href="matlab:help IRImage.med">med</a>', 'median filter');
+            fprintf('\t%50s: %s\n', '<a href="matlab:help IRImage.rmr">rmr</a>', 'row mean removal');
             
             % KERNELS
             fprintf('\n');
             fprintf('  Kernels (static methods):');
             fprintf('\n');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.box">box</a>', 'box blur kernel (mean filter)');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.gauss2d">gauss2d</a>', 'gaussian kernel');
-            fprintf('\t%50s: %s\n', '<a href="matlab:helpPopup IRImage.tri">tri</a>', 'triangle filter kernel');
+            fprintf('\t%50s: %s\n', '<a href="matlab:help IRImage.box">box</a>', 'box blur kernel (mean filter)');
+            fprintf('\t%50s: %s\n', '<a href="matlab:help IRImage.gauss2d">gauss2d</a>', 'gaussian kernel');
+            fprintf('\t%50s: %s\n', '<a href="matlab:help IRImage.tri">tri</a>', 'triangle filter kernel');
             
             fprintf('\n');
         end
@@ -871,29 +655,5 @@ function pad = localFixPads(pad)
     % fix scalar input (1x1 -> 1x4)
     if isscalar(pad)
         pad = repmat(pad, 1, 4);
-    end
-end
-
-function localCheckLOS(setpix, value, minval, maxval)
-    % if min/max values on 'value' are specified
-    if nargin > 2 && any(setpix < minval | setpix > maxval)
-        error('Attempted to set pixel values outside image bounds.');
-    end
-
-    % continue to only check the first 2 args
-    if isempty(setpix) || isempty(value)
-        error('Pixel and LOS vectors must both be non-empty vectors of the same length.');
-    elseif any(isnan(setpix)) || any(isnan(value))
-        error('NaN is not a valid LOS or pixel value.');
-    elseif ~isvector(setpix) || ~isvector(value) || length(setpix) ~= length(value)
-        error('Pixel and LOS vectors must both have the same length.')
-    end
-        
-    % values must be monotonically increasing or decreasing
-    pixdir = sign(diff(setpix));
-    valuedir = sign(diff(value));
-
-    if ~(all(pixdir == 1) || all(pixdir == -1)) && ~(all(valuedir == 1) || all(valuedir == -1))
-        error('Pixel and LOS vectors must both be monotonically increasing or decreasing.')
     end
 end
